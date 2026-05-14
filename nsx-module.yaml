@@ -1,0 +1,63 @@
+schema_version: 1
+
+module:
+  name: nsx-ethos-u-driver
+  type: runtime
+  version: "0.1.0"
+
+support:
+  ambiqsuite: true
+  zephyr: false
+
+summary: >-
+  NSX integration of Arm's Ethos-U core driver. Wraps the upstream
+  ethos-u-core-driver (vendored as a submodule) with NSX build glue, CMSIS-based
+  cache coherency hooks, a board-supplied IRQ shim, and inference begin/end
+  probes. Runtime-agnostic — consumed by HeliaAOT, HeliaRT, TFLM applications,
+  and bespoke C runtimes alike.
+
+capabilities:
+  - npu
+  - ethos_u
+  - ethos_u55
+  - ethos_u65
+  - ethos_u85
+  - inference
+
+use_cases:
+  - run Vela-compiled command streams on Ethos-U NPUs
+  - NPU IRQ wiring and cache-coherent invocation on Armv8.1-M hosts
+  - host-side begin/end probes for profiling (e.g. helia-profiler)
+
+agent_keywords:
+  - ethos-u
+  - ethos-u85
+  - npu
+  - vela
+  - inference
+
+build:
+  cmake:
+    package: nsx_ethos_u_driver
+    targets:
+      - nsx::ethos_u_driver
+
+depends:
+  required:
+    - nsx-cmsis-core
+    - nsx-core
+    - nsx-soc-hal
+  optional:
+    - nsx-harness
+
+compatibility:
+  # The module itself is board- and SoC-agnostic. Boards opt in by setting
+  # NSX_HAS_NPU=1 and supplying the NPU base address + IRQ number.
+  boards:
+    - "*"
+  socs:
+    - "*"
+  toolchains:
+    - arm-none-eabi-gcc
+    - armclang
+    - atfe

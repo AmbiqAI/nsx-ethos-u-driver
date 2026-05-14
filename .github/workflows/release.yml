@@ -1,0 +1,72 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      pr: ${{ steps.release.outputs.pr }}
+
+    steps:
+      - name: Run Release Please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # GITHUB_TOKEN-authored events never re-trigger workflows; dispatch CI
+      # explicitly on the release-please branch so branch-protection's
+      # required check ("gate") can pass without a human re-push. Same recipe
+      # as AmbiqAI/neuralspotx#92.
+      - name: Dispatch CI on the release-please PR branch
+        if: ${{ steps.release.outputs.pr }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          branch=$(echo '${{ steps.release.outputs.pr }}' | jq -r '.headBranchName')
+          echo "Dispatching ci.yml on $branch"
+          gh workflow run ci.yml --ref "$branch"
+
+  github-release:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          submodules: recursive
+
+      - name: Create source archive
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          MODULE_NAME="nsx-ethos-u-driver"
+          ARCHIVE="${MODULE_NAME}-${TAG#v}.tar.gz"
+          # Include submodule content in the published tarball so consumers
+          # who download the release don't need to re-resolve the submodule.
+          tar --transform "s,^,${MODULE_NAME}-${TAG#v}/," \
+              --exclude-vcs --exclude-vcs-ignores \
+              -czf "$ARCHIVE" \
+              $(git ls-files) $(git submodule foreach --quiet 'git ls-files | sed "s,^,$displaypath/,"')
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Upload archive to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          files: ${{ env.ARCHIVE }}

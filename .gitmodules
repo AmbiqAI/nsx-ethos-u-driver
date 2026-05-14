@@ -1,0 +1,12 @@
+[submodule "external/ethos-u-core-driver"]
+	path = external/ethos-u-core-driver
+	# Canonical upstream is https://git.mlplatform.org/ml/ethos-u/ethos-u-core-driver.git
+	# but that host does not expose smart-HTTP for anonymous clone, so we use
+	# the GitHub mirror (archived; tag-stable through 24.11-rc2).
+	url = https://github.com/meta-pytorch/ethos-u-core-driver-mirror.git
+	# Pinned working tree is on a calendar tag (e.g. 24.08). Pair the tag with
+	# the Vela compiler version your apps use to produce command streams.
+	# Update via:
+	#   cd external/ethos-u-core-driver && git fetch --tags && git checkout <tag>
+	#   cd - && git add external/ethos-u-core-driver && \
+	#       git commit -m "deps: bump ethos-u-core-driver to <tag>"
