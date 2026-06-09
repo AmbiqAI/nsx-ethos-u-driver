@@ -42,6 +42,18 @@ if(NOT DEFINED NSX_CPU)
     message(FATAL_ERROR
         "NSX_CPU must be defined before nsx-ethos-u-driver is added.")
 endif()
+if(NOT TARGET nsx::cmsis_core)
+    message(FATAL_ERROR
+        "nsx::cmsis_core must be defined before nsx-ethos-u-driver is added.")
+endif()
+if(NOT TARGET nsx::core)
+    message(FATAL_ERROR
+        "nsx::core must be defined before nsx-ethos-u-driver is added.")
+endif()
+if(NOT TARGET nsx::soc_hal)
+    message(FATAL_ERROR
+        "nsx::soc_hal must be defined before nsx-ethos-u-driver is added.")
+endif()
 
 # ----------------------------------------------------------------------------
 # Configurables
@@ -56,7 +68,7 @@ option(NSX_ETHOSU_BUILD_PMU
 # Parse the family (u55 / u65 / u85) from the config string. Used both to
 # pick the device backend source and to set per-family compile defines that
 # upstream's headers gate on.
-string(REGEX MATCH "ethos-u([0-9]+)" _NSX_ETHOSU_FAMILY_MATCH "${NSX_ETHOSU_NPU_CONFIG}")
+string(REGEX MATCH "^ethos-u([0-9]+)-([0-9]+)$" _NSX_ETHOSU_FAMILY_MATCH "${NSX_ETHOSU_NPU_CONFIG}")
 if(NOT _NSX_ETHOSU_FAMILY_MATCH)
     message(FATAL_ERROR
         "nsx-ethos-u-driver: NSX_ETHOSU_NPU_CONFIG='${NSX_ETHOSU_NPU_CONFIG}' "
@@ -64,6 +76,20 @@ if(NOT _NSX_ETHOSU_FAMILY_MATCH)
 endif()
 set(NSX_ETHOSU_FAMILY_NUM "${CMAKE_MATCH_1}")
 set(NSX_ETHOSU_FAMILY "u${NSX_ETHOSU_FAMILY_NUM}")
+set(NSX_ETHOSU_MACS "${CMAKE_MATCH_2}")
+
+if(NSX_ETHOSU_FAMILY STREQUAL "u55")
+    set(NSX_ETHOSU_DEVICE_DEFINE ETHOSU55)
+elseif(NSX_ETHOSU_FAMILY STREQUAL "u65")
+    set(NSX_ETHOSU_DEVICE_DEFINE ETHOSU65)
+elseif(NSX_ETHOSU_FAMILY STREQUAL "u85")
+    set(NSX_ETHOSU_DEVICE_DEFINE ETHOSU85)
+else()
+    message(FATAL_ERROR
+        "nsx-ethos-u-driver: unsupported NPU family '${NSX_ETHOSU_FAMILY}' "
+        "(from NSX_ETHOSU_NPU_CONFIG='${NSX_ETHOSU_NPU_CONFIG}'). "
+        "Supported: u55, u65, u85.")
+endif()
 
 # ----------------------------------------------------------------------------
 # Vendored upstream
@@ -130,6 +156,10 @@ set_target_properties(nsx_ethos_u_driver PROPERTIES EXPORT_NAME ethos_u_driver)
 add_library(nsx::ethos_u_driver ALIAS nsx_ethos_u_driver)
 
 target_compile_definitions(nsx_ethos_u_driver PUBLIC
+    ETHOSU
+    ETHOSU_ARCH=${NSX_ETHOSU_FAMILY}
+    ETHOSU_MACS=${NSX_ETHOSU_MACS}
+    ${NSX_ETHOSU_DEVICE_DEFINE}
     NSX_HAS_NPU=1
     NSX_ETHOSU_NPU_FAMILY_${NSX_ETHOSU_FAMILY}=1
     # Upstream consumes this string (quoted) in its config header to gate
@@ -161,8 +191,8 @@ target_include_directories(nsx_ethos_u_driver PRIVATE
 target_link_libraries(nsx_ethos_u_driver PUBLIC
     ${NSX_BOARD_FLAGS_TARGET}
     nsx::cmsis_core
-    nsx_core
-    nsx_soc_hal
+    nsx::core
+    nsx::soc_hal
 )
 
 # ----------------------------------------------------------------------------

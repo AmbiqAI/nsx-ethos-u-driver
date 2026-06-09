@@ -16,21 +16,11 @@
 #include <stdint.h>
 
 /*
- * CMSIS core header — selected per-CPU by nsx-cmsis-core. On targets
- * without a unified-cache D-cache (e.g. Cortex-M4 builds that somehow
- * end up linking this TU), the SCB_*DCache_by_Addr helpers expand to
- * empty inline functions, so the body remains safe.
+ * Pull in the SoC device header rather than a generic CMSIS core header so
+ * feature macros like __DSP_PRESENT, __DCACHE_PRESENT, __NVIC_PRIO_BITS, and
+ * IRQn_Type are defined before the core cache helpers are seen.
  */
-#include "cmsis_compiler.h"
-
-#if defined(__ARM_ARCH_8_1M_MAIN__) || defined(ARMCM55) || defined(ARMCM85)
-#include "core_cm55.h" /* drags in SCB_CleanDCache_by_Addr et al. */
-#else
-/*
- * Fallback: rely on whatever CMSIS device header the board has already
- * pulled in (NSX_BOARD_FLAGS_TARGET adds the right one transparently).
- */
-#endif
+#include "am_mcu_apollo.h"
 
 /*
  * The upstream symbols are declared `extern "C"` and weak in
