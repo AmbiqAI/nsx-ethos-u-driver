@@ -26,16 +26,16 @@ runtimes) invoke Vela-compiled command streams on an Arm Ethos-U NPU.
     `nsx_ethos_u_init()` and `nsx_ethos_u_irq()`.
 - A CMake target `nsx::ethos_u_driver` that consumers link against.
 
-## What this module is *not*
+## Where it fits
 
-- It is not the Vela compiler. Vela is a host-side Python tool that
-  produces the command stream; the driver here consumes that stream at
-  runtime.
-- It is not a runtime. HeliaRT, HeliaAOT, TFLM, and any other runtime
-  consume this module as a regular dependency.
-- It is not SoC-specific. Boards supply the NPU base address and the IRQ
-  number; the BSP wires the vector entry; this module is otherwise
-  silicon-agnostic.
+- Vela remains the host-side compiler that produces the command stream.
+  This module is the runtime-side driver layer that consumes that stream on
+  the target.
+- HeliaRT, HeliaAOT, TFLM, and other runtimes sit above this layer and use
+  `nsx::ethos_u_driver` as a regular dependency.
+- Board and BSP layers still provide the NPU base address, IRQ number, and
+  vector wiring. This module stays focused on the reusable driver and NSX
+  integration surface rather than board-specific setup.
 
 ## Vendoring
 
@@ -67,10 +67,11 @@ common source of runtime errors.
 We compile the upstream sources directly under NSX toolchain flags rather
 than using upstream's own CMakeLists. Upstream drives target-CPU selection
 via `CMAKE_SYSTEM_PROCESSOR` (or `TARGET_CPU` with ethos-u-core-platform
-toolchain files); NSX drives it via `NSX_CPU` / `NSX_FPU` / `NSX_ABI_FLAGS`
-on `${NSX_BOARD_FLAGS_TARGET}`. The board flags target supplies the right
-compiler/linker switches transitively, so the upstream TUs build with the
-same flags as every other NSX module.
+toolchain files); NSX drives it via `nsx::soc_flags`, which carries the
+active SoC's CPU/FPU/ABI/compiler facts transitively. That keeps this module
+aligned with the newer neuralSPOT-X split between generic SoC facts and
+board-only facts, while still ensuring the upstream TUs build with the same
+flags as every other NSX module.
 
 See [`CMakeLists.txt`](CMakeLists.txt) for the full rationale.
 
@@ -79,7 +80,7 @@ See [`CMakeLists.txt`](CMakeLists.txt) for the full rationale.
 Set in your board (or app) before adding the module:
 
 | Variable | Default | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `NSX_ETHOSU_NPU_CONFIG` | `ethos-u85-256` | Vela / driver NPU config (`ethos-uNN-MACS`). |
 | `NSX_ETHOSU_BUILD_PMU` | `ON` | Build the upstream PMU helper TU. |
 

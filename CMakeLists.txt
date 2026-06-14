@@ -20,10 +20,10 @@
 #   `CMAKE_SYSTEM_PROCESSOR` (or `TARGET_CPU` when used in conjunction with
 #   ethos-u-core-platform toolchain files). It also performs its own flag
 #   manipulation and assumes a gcc-style driver. To remain aligned with the
-#   NSX toolchain model (NSX_CPU, NSX_FPU, NSX_ABI_FLAGS, nsx_apply_toolchain_flags)
+#   NSX toolchain model (`nsx::soc_flags`, nsx_apply_toolchain_flags)
 #   and to keep armclang / ATfE behaviour predictable, we deliberately do NOT
 #   `add_subdirectory()` upstream. Instead we list its sources here and let
-#   our board-supplied `${NSX_BOARD_FLAGS_TARGET}` carry the CPU/FPU flags.
+#   the active SoC-flags target carry the CPU/FPU/ABI flags transitively.
 #
 #   The upstream config headers (`src/ethosu_config_uX5.h`) still need a
 #   compile-time NPU family selector, which we provide via
@@ -34,13 +34,9 @@
 # upstream's CMakeLists begins to bake in flag generation we can't easily
 # replicate. As of ethos-u-core-driver 25.x it does not.
 
-if(NOT DEFINED NSX_BOARD_FLAGS_TARGET)
+if(NOT TARGET nsx::soc_flags)
     message(FATAL_ERROR
-        "Board must define NSX_BOARD_FLAGS_TARGET before nsx-ethos-u-driver is added.")
-endif()
-if(NOT DEFINED NSX_CPU)
-    message(FATAL_ERROR
-        "NSX_CPU must be defined before nsx-ethos-u-driver is added.")
+        "nsx::soc_flags must be defined before nsx-ethos-u-driver is added.")
 endif()
 if(NOT TARGET nsx::cmsis_core)
     message(FATAL_ERROR
@@ -189,7 +185,7 @@ target_include_directories(nsx_ethos_u_driver PRIVATE
 )
 
 target_link_libraries(nsx_ethos_u_driver PUBLIC
-    ${NSX_BOARD_FLAGS_TARGET}
+    nsx::soc_flags
     nsx::cmsis_core
     nsx::core
     nsx::soc_hal
