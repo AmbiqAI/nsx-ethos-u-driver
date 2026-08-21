@@ -8,8 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Initial module scaffolding.
-- Vendored Arm `ethos-u-core-driver` as a git submodule under
-  `external/ethos-u-core-driver/`.
+- Vendored Arm `ethos-u-core-driver` under `external/ethos-u-core-driver/`.
 - NSX-flavoured facade in `includes-api/nsx_ethos_u.h`.
 - CMSIS-based weak overrides for `ethosu_flush_dcache`,
   `ethosu_invalidate_dcache`, `ethosu_inference_begin`,

@@ -48,30 +48,28 @@ jobs:
           echo "$MODULE_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$' \
             || { echo "Version '$MODULE_VERSION' is not valid semver"; exit 1; }
 
-  submodule-check:
+  vendor-check:
     name: Vendored upstream present
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
-      - name: Verify ethos-u-core-driver submodule
+      - name: Verify vendored ethos-u-core-driver tree
         run: |
           test -f external/ethos-u-core-driver/include/ethosu_driver.h \
-            || { echo "submodule not initialised"; exit 1; }
+            || { echo "vendored driver tree missing"; exit 1; }
 
   gate:
     name: lint-and-test
     if: always()
-    needs: [lint, version-check, submodule-check]
+    needs: [lint, version-check, vendor-check]
     runs-on: ubuntu-latest
     steps:
       - name: Decide status
         run: |
           if [[ "${{ needs.lint.result }}" != "success" ]] \
             || [[ "${{ needs.version-check.result }}" != "success" ]] \
-            || [[ "${{ needs.submodule-check.result }}" != "success" ]]; then
+            || [[ "${{ needs.vendor-check.result }}" != "success" ]]; then
             echo "One or more CI jobs failed."
             exit 1
           fi

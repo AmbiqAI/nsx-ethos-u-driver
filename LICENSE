@@ -15,5 +15,6 @@
    limitations under the License.
 
 Note: this repository vendors Arm's ethos-u-core-driver under
-external/ethos-u-core-driver/ via a git submodule. That code is also
+external/ethos-u-core-driver/ as a vendored snapshot (see
+PROVENANCE.md). That code is also
 Apache-2.0 licensed and retains its own LICENSE.txt and copyright headers.
