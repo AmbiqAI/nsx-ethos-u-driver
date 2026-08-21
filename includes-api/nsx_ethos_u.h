@@ -71,16 +71,44 @@ void nsx_ethos_u_set_probe(nsx_ethos_u_probe_fn fn);
  *
  * @param drv       Caller-allocated driver handle (zero-initialised).
  * @param npu_base  NPU register base address (board-specific).
- * @param irq_num   NVIC IRQ number for the NPU (board-specific). Used
- *                  only for documentation and runtime checks; the
- *                  board must still wire the vector entry to
- *                  `nsx_ethos_u_irq()` (or `ethosu_irq_handler()`).
+ * @param irq_num   NVIC IRQ number for the NPU (board-specific).
+ *                  Informational only (unused); the board must still
+ *                  wire the vector entry to `nsx_ethos_u_irq()` (or
+ *                  `ethosu_irq_handler()`).
  * @return 0 on success, otherwise the negative error code from
  *         `ethosu_init()`.
  */
 int nsx_ethos_u_init(struct ethosu_driver *drv,
                      void *npu_base,
                      uint32_t irq_num);
+
+/**
+ * As @ref nsx_ethos_u_init, with explicit security/privilege selection.
+ *
+ * The values must match the security/privilege level the NPU actually
+ * observes on its interface (PROT.active_CSL/CPL) -- which is a platform
+ * property, not necessarily the CPU-side alias used for MMIO. The values
+ * map directly
+ * to `ethosu_init()`'s `secure_enable` / `privilege_enable` parameters,
+ * which program RESET.pending_CSL/CPL and are verified against
+ * PROT.active_CSL/CPL by the upstream driver.
+ */
+int nsx_ethos_u_init_ex(struct ethosu_driver *drv,
+                        void *npu_base,
+                        uint32_t irq_num,
+                        uint32_t secure_enable,
+                        uint32_t privilege_enable);
+
+/**
+ * Clear the driver handle stashed for @ref nsx_ethos_u_irq.
+ *
+ * Call during teardown from thread context (not from an ISR that may
+ * have preempted a running NPU handler), AFTER masking the NPU IRQ at the NVIC
+ * (`NVIC_DisableIRQ` + `__DSB()`/`__ISB()`) and BEFORE
+ * `ethosu_deinit(drv)`: a late or already-pended interrupt then no-ops
+ * in `nsx_ethos_u_irq()` instead of dispatching into a freed driver.
+ */
+void nsx_ethos_u_deinit(void);
 
 /**
  * IRQ trampoline. Boards hook this into their vector table at the
