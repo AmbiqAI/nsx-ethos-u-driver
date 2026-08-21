@@ -23,7 +23,11 @@
  */
 static struct ethosu_driver *g_nsx_ethos_u_drv;
 
-int nsx_ethos_u_init(struct ethosu_driver *drv, void *npu_base, uint32_t irq_num) {
+int nsx_ethos_u_init_ex(struct ethosu_driver *drv,
+                        void *npu_base,
+                        uint32_t irq_num,
+                        uint32_t secure_enable,
+                        uint32_t privilege_enable) {
     (void)irq_num; /* informational only; board owns the vector wiring */
     if (drv == NULL || npu_base == NULL) {
         return -1;
@@ -33,12 +37,27 @@ int nsx_ethos_u_init(struct ethosu_driver *drv, void *npu_base, uint32_t irq_num
                          npu_base,
                          /* fast_memory      */ NULL,
                          /* fast_memory_size */ 0U,
-                         /* secure_enable    */ 1U,
-                         /* privilege_enable */ 1U);
+                         secure_enable,
+                         privilege_enable);
     if (rc == 0) {
         g_nsx_ethos_u_drv = drv;
     }
     return rc;
+}
+
+int nsx_ethos_u_init(struct ethosu_driver *drv, void *npu_base, uint32_t irq_num) {
+    /* Common case: secure + privileged, matching the AmbiqSuite NPU
+     * examples. Integrations driving the NPU through a non-secure MMIO
+     * alias should call nsx_ethos_u_init_ex() with secure_enable=0. */
+    return nsx_ethos_u_init_ex(drv, npu_base, irq_num, 1U, 1U);
+}
+
+void nsx_ethos_u_deinit(void) {
+    /* Clears the stashed handle so a late/pended NPU IRQ arriving after
+     * teardown no-ops in nsx_ethos_u_irq() instead of touching a freed
+     * driver. Call AFTER masking the IRQ (NVIC_DisableIRQ + __DSB/__ISB)
+     * and BEFORE ethosu_deinit(drv). */
+    g_nsx_ethos_u_drv = NULL;
 }
 
 void nsx_ethos_u_irq(void) {

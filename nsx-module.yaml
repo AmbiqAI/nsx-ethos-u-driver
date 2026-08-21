@@ -11,7 +11,7 @@ support:
 
 summary: >-
   NSX integration of Arm's Ethos-U core driver. Wraps the upstream
-  ethos-u-core-driver (vendored as a submodule) with NSX build glue, CMSIS-based
+  ethos-u-core-driver (vendored as plain files) with NSX build glue, CMSIS-based
   cache coherency hooks, a board-supplied IRQ shim, and inference begin/end
   probes. Runtime-agnostic — consumed by HeliaAOT, HeliaRT, TFLM applications,
   and bespoke C runtimes alike.

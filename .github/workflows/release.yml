@@ -50,19 +50,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
-          submodules: recursive
 
       - name: Create source archive
         run: |
           TAG="${{ needs.release-please.outputs.tag_name }}"
           MODULE_NAME="nsx-ethos-u-driver"
           ARCHIVE="${MODULE_NAME}-${TAG#v}.tar.gz"
-          # Include submodule content in the published tarball so consumers
-          # who download the release don't need to re-resolve the submodule.
+          # The upstream driver is vendored as plain tracked files, so
+          # `git ls-files` already covers the full tree.
           tar --transform "s,^,${MODULE_NAME}-${TAG#v}/," \
               --exclude-vcs --exclude-vcs-ignores \
               -czf "$ARCHIVE" \
-              $(git ls-files) $(git submodule foreach --quiet 'git ls-files | sed "s,^,$displaypath/,"')
+              $(git ls-files)
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
       - name: Upload archive to release

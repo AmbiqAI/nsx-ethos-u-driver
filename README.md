@@ -39,24 +39,26 @@ runtimes) invoke Vela-compiled command streams on an Arm Ethos-U NPU.
 
 ## Vendoring
 
-The upstream driver lives at `external/ethos-u-core-driver/` as a git
-submodule. After cloning this repo:
+The upstream driver lives at `external/ethos-u-core-driver/` as a plain
+vendored snapshot (not a git submodule): the NSX registry resolver
+materialises modules with `git clone` + `.git` stripping and does not
+initialise submodules, so the tree must be self-contained. Provenance
+(upstream URL, mirror, pinned revision) is recorded in
+[`PROVENANCE.md`](PROVENANCE.md).
+
+To upgrade upstream, replace the tree with the new revision's files and
+update `PROVENANCE.md` in the same commit:
 
 ```sh
-git submodule update --init --recursive
+git clone https://github.com/meta-pytorch/ethos-u-core-driver-mirror.git /tmp/eucd
+git -C /tmp/eucd checkout <tag-or-sha>
+rsync -a --delete --exclude=.git /tmp/eucd/ external/ethos-u-core-driver/
+git add external/ethos-u-core-driver PROVENANCE.md
+git commit -m "deps(ethos-u-core-driver): bump to <tag-or-sha>"
 ```
 
-To upgrade upstream, check out a release tag inside the submodule and commit
-the new SHA:
-
-```sh
-cd external/ethos-u-core-driver
-git fetch --tags
-git checkout <tag>
-cd -
-git add external/ethos-u-core-driver
-git commit -m "deps(ethos-u-core-driver): bump to <tag>"
-```
+Keep the Arm source pristine — express Ambiq/NSX behavior as weak
+overrides or config in `src/`, never as edits inside `external/`.
 
 Pin to the version that matches the Vela compiler used to produce the
 command streams your apps run. Mismatched driver/Vela versions are the most

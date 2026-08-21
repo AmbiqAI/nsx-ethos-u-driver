@@ -4,8 +4,9 @@
 # nsx-ethos-u-driver — NSX integration of Arm's ethos-u-core-driver.
 #
 # Layout:
-#   external/ethos-u-core-driver/   - upstream driver, vendored as a git
-#                                     submodule (Apache-2.0). We compile its
+#   external/ethos-u-core-driver/   - upstream driver, vendored as plain
+#                                     files (Apache-2.0; see PROVENANCE.md).
+#                                     We compile its
 #                                     sources directly with NSX toolchain
 #                                     flags rather than calling
 #                                     add_subdirectory() on its CMakeLists.
@@ -61,6 +62,14 @@ set(NSX_ETHOSU_NPU_CONFIG "ethos-u85-256" CACHE STRING
 option(NSX_ETHOSU_BUILD_PMU
     "Build the Ethos-U PMU helper TU from upstream" ON)
 
+# Upstream's ethosu_log.h defaults ETHOSU_LOG_ENABLE to 1, which pulls
+# fprintf(stdout/stderr, ...) into the driver -- unwanted stdio /
+# semi-hosting pressure on bare-metal builds. Default it off; consumers
+# that want upstream logging can turn this on. PRIVATE below: ethosu_log.h
+# lives in the driver's private src/ include dir, so no consumer TU sees it.
+option(NSX_ETHOSU_LOG_ENABLE
+    "Enable upstream ethos-u-core-driver LOG()/fprintf-based logging" OFF)
+
 # Parse the family (u55 / u65 / u85) from the config string. Used both to
 # pick the device backend source and to set per-family compile defines that
 # upstream's headers gate on.
@@ -98,8 +107,8 @@ set(_NSX_ETHOSU_VENDOR_SRC ${_NSX_ETHOSU_VENDOR_DIR}/src)
 if(NOT EXISTS "${_NSX_ETHOSU_VENDOR_INC}/ethosu_driver.h")
     message(FATAL_ERROR
         "nsx-ethos-u-driver: vendored ethos-u-core-driver not found at "
-        "${_NSX_ETHOSU_VENDOR_DIR}. Initialise the submodule:\n"
-        "  git submodule update --init --recursive")
+        "${_NSX_ETHOSU_VENDOR_DIR}. The vendored tree ships in-repo; "
+        "re-vendor it from the pinned revision in PROVENANCE.md.")
 endif()
 
 # Verified against ethos-u-core-driver tag 24.08, all .c (no .cc):
@@ -133,7 +142,7 @@ foreach(_src IN LISTS _NSX_ETHOSU_UPSTREAM_SOURCES)
     if(NOT EXISTS "${_src}")
         message(FATAL_ERROR
             "nsx-ethos-u-driver: expected upstream source '${_src}' not found. "
-            "Did the submodule layout change?")
+            "Did the vendored upstream layout change?")
     endif()
 endforeach()
 
@@ -168,7 +177,18 @@ target_compile_definitions(nsx_ethos_u_driver PUBLIC
 # the leading "ethos-" prefix; harmless to expose both.
 target_compile_definitions(nsx_ethos_u_driver PRIVATE
     ETHOSU_TARGET_NPU=${NSX_ETHOSU_FAMILY_NUM}
+    ETHOSU_LOG_ENABLE=$<BOOL:${NSX_ETHOSU_LOG_ENABLE}>
 )
+
+# With logging off, LOG_ERR() in the vendored device backends expands to
+# nothing and leaves their `dev` parameter unused; the Arm tree stays
+# pristine, so silence just that warning for the driver TUs instead of
+# patching upstream. (gcc/clang/armclang all accept the flag.)
+if(NOT NSX_ETHOSU_LOG_ENABLE)
+    target_compile_options(nsx_ethos_u_driver PRIVATE
+        $<$<C_COMPILER_ID:GNU,Clang,ARMClang>:-Wno-unused-parameter>
+    )
+endif()
 
 target_include_directories(nsx_ethos_u_driver PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/includes-api>
