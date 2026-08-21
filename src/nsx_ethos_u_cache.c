@@ -6,9 +6,11 @@
  * core driver. These replace the weak no-op defaults shipped by
  * upstream; see ethos-u-core-driver/README.md ("Data caching").
  *
- * Both addresses are required by the upstream contract to be 32-byte
- * aligned. Applications are still strongly encouraged to perform
- * their own IFM flush before invoking inference rather than relying
+ * Both addresses are required by the upstream contract to be 16-byte
+ * aligned (ethosu_driver.h); the CMSIS SCB helpers round coverage out to
+ * whole 32-byte cache lines. Applications are still strongly
+ * encouraged to perform their own IFM flush before invoking inference
+ * rather than relying
  * on `ethosu_flush_dcache`, which upstream documents as deprecated.
  */
 
@@ -29,7 +31,11 @@
 
 void ethosu_flush_dcache(uint32_t *p, size_t bytes) {
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    if (p != NULL && bytes > 0U) {
+    if (p == NULL) {
+        /* Upstream contract (ethosu_driver.h): NULL means "flush the
+         * whole cache". */
+        SCB_CleanDCache();
+    } else if (bytes > 0U) {
         SCB_CleanDCache_by_Addr(p, (int32_t)bytes);
     }
 #else
@@ -40,7 +46,13 @@ void ethosu_flush_dcache(uint32_t *p, size_t bytes) {
 
 void ethosu_invalidate_dcache(uint32_t *p, size_t bytes) {
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    if (p != NULL && bytes > 0U) {
+    if (p == NULL) {
+        /* Upstream contract: NULL means "invalidate the whole cache".
+         * Clean+invalidate rather than a raw invalidate: discarding
+         * unrelated dirty lines (stack, globals) system-wide would
+         * corrupt program state. */
+        SCB_CleanInvalidateDCache();
+    } else if (bytes > 0U) {
         SCB_InvalidateDCache_by_Addr(p, (int32_t)bytes);
     }
 #else
