@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2](https://github.com/AmbiqAI/nsx-ethos-u-driver/compare/nsx-ethos-u-driver-v0.1.1...nsx-ethos-u-driver-v0.1.2) (2026-08-22)
+
+
+### Features
+
+* CI smoke build + semaphore override with real timeout ([#6](https://github.com/AmbiqAI/nsx-ethos-u-driver/issues/6)) ([728aa52](https://github.com/AmbiqAI/nsx-ethos-u-driver/commit/728aa529b45e3b4d0e47160b6cd5dd792f85234e))
+
+
+### Bug Fixes
+
+* **smoke:** disable PIE for the partial-link acceptance on GNU hosts ([#8](https://github.com/AmbiqAI/nsx-ethos-u-driver/issues/8)) ([b58bef7](https://github.com/AmbiqAI/nsx-ethos-u-driver/commit/b58bef7623aebb12208efbabc8573af4a1458a5e))
+
 ## [0.1.1](https://github.com/AmbiqAI/nsx-ethos-u-driver/compare/nsx-ethos-u-driver-v0.1.0...nsx-ethos-u-driver-v0.1.1) (2026-08-21)
 
 
