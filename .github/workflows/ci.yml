@@ -66,7 +66,7 @@ jobs:
       fail-fast: false
       matrix:
         npu_config: [ethos-u55-128, ethos-u85-256]
-        log_enable: [ON, OFF]
+        log_enable: ['ON', 'OFF']
     steps:
       - uses: actions/checkout@v4
 
@@ -87,6 +87,14 @@ jobs:
         run: |
           git diff --quiet -- external/ \
             || { echo "::error::build modified external/ (provenance-protected)"; exit 1; }
+          # --quiet only sees tracked files; a build that *adds* files under
+          # external/ (object files, CMake caches) is just as much a
+          # provenance violation, so check for untracked/ignored ones too.
+          if [ -n "$(git status --porcelain --untracked-files=all -- external/)" ]; then
+            echo "::error::build added or changed files under external/ (provenance-protected)"
+            git status --porcelain --untracked-files=all -- external/
+            exit 1
+          fi
 
   smoke-build-arm:
     name: Smoke build arm-none-eabi (${{ matrix.npu_config }})
@@ -101,10 +109,12 @@ jobs:
       - name: Install arm-none-eabi-gcc
         run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
 
-      # Cross build only compiles the static library: the harness carries no
-      # startup code or linker script, so the host job above is what runs the
-      # tests. This job exists to exercise the M-profile code paths (PRIMASK
-      # critical sections, WFE/SEV) that a host build compiles out.
+      # Cross build compiles the static library and runs the override
+      # acceptance check: the harness carries no startup code or linker script,
+      # so the host job above is what runs the behavioural tests. This job
+      # exists to exercise the M-profile code paths (PRIMASK critical sections,
+      # WFE/SEV) that a host build compiles out, and to prove on the *target*
+      # toolchain that the strong src/ definitions beat upstream's weak ones.
       - name: Configure
         run: |
           cmake -S tests/smoke -B build/smoke-arm \
@@ -117,6 +127,26 @@ jobs:
 
       - name: Build static library
         run: cmake --build build/smoke-arm --parallel --target nsx_ethos_u_driver
+
+      # nsx_ethos_u_link_acceptance is a partial (-r) link of a TU that
+      # references only ethosu_init()/nsx_ethos_u_init(). Its POST_BUILD step
+      # runs tests/smoke/check_overrides.cmake, which fails the build if any
+      # ethosu_* hook resolved to upstream's weak definition.
+      - name: Override acceptance (strong src/ definitions win the link)
+        run: cmake --build build/smoke-arm --parallel --target nsx_ethos_u_link_acceptance
+
+      - name: Verify vendored tree untouched
+        run: |
+          git diff --quiet -- external/ \
+            || { echo "::error::build modified external/ (provenance-protected)"; exit 1; }
+          # --quiet only sees tracked files; a build that *adds* files under
+          # external/ (object files, CMake caches) is just as much a
+          # provenance violation, so check for untracked/ignored ones too.
+          if [ -n "$(git status --porcelain --untracked-files=all -- external/)" ]; then
+            echo "::error::build added or changed files under external/ (provenance-protected)"
+            git status --porcelain --untracked-files=all -- external/
+            exit 1
+          fi
 
   gate:
     name: lint-and-test
