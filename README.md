@@ -85,11 +85,25 @@ Set in your board (or app) before adding the module:
 | --- | --- | --- |
 | `NSX_ETHOSU_NPU_CONFIG` | `ethos-u85-256` | Vela / driver NPU config (`ethos-uNN-MACS`). |
 | `NSX_ETHOSU_BUILD_PMU` | `ON` | Build the upstream PMU helper TU. |
+| `NSX_ETHOSU_LOG_ENABLE` | `OFF` | Enable upstream `LOG()`/`fprintf` driver logging. |
+| `NSX_ETHOSU_INFERENCE_TIMEOUT_MS` | *(empty)* | Deadline in ms for `ethosu_wait()`. Empty = upstream's "wait forever". |
 
 The CMakeLists parses the family token (`u55` / `u65` / `u85`) from
 `NSX_ETHOSU_NPU_CONFIG` and selects the matching `ethosu_device_uNN`
-source. The string is also exposed to consumers as the public compile
-definition `ETHOSU_TARGET_NPU_CONFIG`.
+source. The family is exposed to consumers as the public compile
+definitions `ETHOSU_ARCH`, `ETHOSU_MACS` and `ETHOSU55`/`ETHOSU65`/`ETHOSU85`
+— the names upstream's own sources actually gate on. (There is no
+`ETHOSU_TARGET_NPU_CONFIG` define; it is a cache variable read only by
+upstream's own CMakeLists, which this module does not `add_subdirectory()`.)
+
+`NSX_ETHOSU_INFERENCE_TIMEOUT_MS` has to be set at *library* configure time:
+it becomes `ETHOSU_SEMAPHORE_WAIT_INFERENCE`, which upstream's
+`ethosu_driver.c` consumes when the library is compiled, so an app-side
+`#define` would have no effect. A finite value only takes effect once the
+application also supplies the `nsx_ethos_u_ticks()` /
+`nsx_ethos_u_ticks_per_ms()` timebase hooks documented in
+`includes-api/nsx_ethos_u.h`; without them the wait stays unbounded, exactly
+as upstream behaves.
 
 ## Consuming the module
 
