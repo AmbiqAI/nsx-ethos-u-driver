@@ -121,6 +121,66 @@ void nsx_ethos_u_deinit(void);
  */
 void nsx_ethos_u_irq(void);
 
+/**
+ * @name Optional timebase hooks for the NPU wait semaphore
+ *
+ * `src/nsx_ethos_u_semaphore.c` provides strong overrides of upstream's weak
+ * bare-metal `ethosu_semaphore_*` functions. Unlike upstream's, ours honours
+ * the `timeout` argument -- but only if the application tells it how to
+ * measure time, via the two weak hooks below.
+ *
+ * ## Contract
+ *
+ * - `nsx_ethos_u_ticks()` returns a free-running, monotonic tick count. It is
+ *   called from the semaphore wait loop, which may run with interrupts masked
+ *   on the `__WFE()` path, so it must be safe to call from any context and
+ *   must not block. Reading a hardware counter (SysTick, STIMER, CTIMER) is
+ *   the intended implementation. Wraparound is tolerated as long as one wait
+ *   is shorter than the counter's period.
+ *
+ * - `nsx_ethos_u_ticks_per_ms()` returns the tick rate in ticks per
+ *   millisecond, or **0 to declare that no time source exists**.
+ *
+ * - The `timeout` passed to `ethosu_semaphore_take()` is interpreted in
+ *   **milliseconds**. Upstream leaves the unit implementation-defined and
+ *   ships the value through untouched; NSX picks milliseconds. Set it via the
+ *   `ETHOSU_SEMAPHORE_WAIT_INFERENCE` macro (see ethosu_driver.h).
+ *
+ * ## Default behaviour
+ *
+ * Both hooks have weak definitions returning 0. With `ticks_per_ms() == 0`
+ * every wait is unbounded, which reproduces upstream's behaviour exactly --
+ * so integrators without a timebase see no change. Define either or both
+ * symbols in application code to override.
+ *
+ * Once a timebase is supplied *and* `ETHOSU_SEMAPHORE_WAIT_INFERENCE` is
+ * finite, a stalled NPU makes `ethosu_semaphore_take()` return -1 after the
+ * deadline, which is what lets `ethosu_wait()` mark the job
+ * ETHOSU_JOB_RESULT_TIMEOUT and issue `ethosu_soft_reset()`.
+ *
+ * ## Caveats
+ *
+ * - The rate is integral, so a sub-kHz timebase rounds down: a 32768 Hz
+ *   counter is 32 ticks/ms, making timeouts fire ~2.4% early. Scale the
+ *   counter in `nsx_ethos_u_ticks()` if that matters.
+ * - Bounded waits poll the timebase by default rather than sleeping on
+ *   `__WFE()`, because the failure they exist to catch (NPU never raises its
+ *   interrupt) may come with no wake event at all. Build with
+ *   `-DNSX_ETHOSU_SEM_BOUNDED_WFE=1` to sleep instead, if you know another
+ *   interrupt fires often enough.
+ * - Semaphore handles come from a static pool sized by
+ *   `NSX_ETHOSU_SEM_POOL_SIZE` (default 4: one global + one per NPU).
+ * @{
+ */
+
+/** @return Monotonic tick count; 0 from the weak default. */
+uint64_t nsx_ethos_u_ticks(void);
+
+/** @return Ticks per millisecond, or 0 for "no time source" (weak default). */
+uint32_t nsx_ethos_u_ticks_per_ms(void);
+
+/** @} */
+
 #ifdef __cplusplus
 }
 #endif

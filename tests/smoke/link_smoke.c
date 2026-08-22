@@ -33,6 +33,13 @@ static const uintptr_t referenced[] = {
     (uintptr_t)&nsx_ethos_u_set_probe,
     /* src/nsx_ethos_u_remap.c */
     (uintptr_t)&ethosu_address_remap,
+    /* src/nsx_ethos_u_semaphore.c */
+    (uintptr_t)&ethosu_semaphore_create,
+    (uintptr_t)&ethosu_semaphore_destroy,
+    (uintptr_t)&ethosu_semaphore_take,
+    (uintptr_t)&ethosu_semaphore_give,
+    (uintptr_t)&nsx_ethos_u_ticks,
+    (uintptr_t)&nsx_ethos_u_ticks_per_ms,
 };
 
 int main(void) {

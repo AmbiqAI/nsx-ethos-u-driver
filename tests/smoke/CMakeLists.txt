@@ -94,4 +94,6 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_link_libraries(nsx_ethos_u_link_smoke PRIVATE nsx::ethos_u_driver)
     target_include_directories(nsx_ethos_u_link_smoke PRIVATE "${NSX_ETHOSU_SMOKE_STUBS}")
     add_test(NAME link_smoke COMMAND nsx_ethos_u_link_smoke)
+
+    add_subdirectory(unit)
 endif()

@@ -13,7 +13,8 @@
 #   includes-api/                   - public NSX-flavoured facade.
 #   src/                            - weak-symbol overrides (cache, IRQ
 #                                     trampoline, begin/end probes, default
-#                                     identity address remap).
+#                                     identity address remap, counting
+#                                     semaphore with real timeout support).
 #
 # Approach (B): explicit source listing.
 #
@@ -157,6 +158,7 @@ add_library(nsx_ethos_u_driver STATIC
     ${CMAKE_CURRENT_LIST_DIR}/src/nsx_ethos_u_cache.c
     ${CMAKE_CURRENT_LIST_DIR}/src/nsx_ethos_u_callbacks.c
     ${CMAKE_CURRENT_LIST_DIR}/src/nsx_ethos_u_remap.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/nsx_ethos_u_semaphore.c
 )
 set_target_properties(nsx_ethos_u_driver PROPERTIES EXPORT_NAME ethos_u_driver)
 add_library(nsx::ethos_u_driver ALIAS nsx_ethos_u_driver)
