@@ -100,7 +100,13 @@ endif()
 add_executable(nsx_ethos_u_link_acceptance link_acceptance.c)
 target_link_libraries(nsx_ethos_u_link_acceptance PRIVATE nsx::ethos_u_driver)
 target_include_directories(nsx_ethos_u_link_acceptance PRIVATE "${NSX_ETHOSU_SMOKE_STUBS}")
-target_link_options(nsx_ethos_u_link_acceptance PRIVATE -nostdlib -nostartfiles -Wl,-r)
+# GNU hosts (ubuntu-latest) default to PIE, which conflicts with the partial
+# link: "ld: -r and -pie may not be used together". Disable PIE there; the
+# flag is unknown to AppleClang (mac ld has no such conflict) and irrelevant
+# to arm-none-eabi (no PIE default), so gate on the GNU compiler id.
+target_link_options(nsx_ethos_u_link_acceptance PRIVATE
+    -nostdlib -nostartfiles -Wl,-r
+    $<$<C_COMPILER_ID:GNU>:-no-pie>)
 set_target_properties(nsx_ethos_u_link_acceptance PROPERTIES
     # -r output is a relocatable object, not an image; skip any link check that
     # would expect an entry point.
@@ -168,7 +174,9 @@ add_executable(nsx_ethos_u_link_transitive link_transitive.c)
 # Deliberately NOT nsx::ethos_u_driver: the middle library is the only thing
 # named here, exactly as an application would.
 target_link_libraries(nsx_ethos_u_link_transitive PRIVATE nsx_ethos_u_smoke_middle)
-target_link_options(nsx_ethos_u_link_transitive PRIVATE -nostdlib -nostartfiles -Wl,-r)
+target_link_options(nsx_ethos_u_link_transitive PRIVATE
+    -nostdlib -nostartfiles -Wl,-r
+    $<$<C_COMPILER_ID:GNU>:-no-pie>)  # see -no-pie note above
 set_target_properties(nsx_ethos_u_link_transitive PROPERTIES LINKER_LANGUAGE C)
 
 if(NSX_ETHOSU_NM)
