@@ -13,7 +13,61 @@
 #   includes-api/                   - public NSX-flavoured facade.
 #   src/                            - weak-symbol overrides (cache, IRQ
 #                                     trampoline, begin/end probes, default
-#                                     identity address remap).
+#                                     identity address remap, counting
+#                                     semaphore with real timeout support).
+#
+# LINK SEMANTICS -- why the overrides are an OBJECT library
+#
+#   Upstream *defines* its bare-metal hooks (ethosu_semaphore_*, ethosu_*cache,
+#   ethosu_inference_begin/end, ethosu_address_remap) as weak symbols inside
+#   ethosu_driver.c / ethosu_device_uXX.c. Our strong replacements live in
+#   separate TUs in src/.
+#
+#   If those TUs are ordinary members of a STATIC archive, they are DEAD CODE:
+#   a linker extracts an archive member only to satisfy an *undefined* symbol.
+#   ethosu_driver.c.obj is always extracted (the app calls ethosu_init), and it
+#   already carries weak definitions of every hook, so nothing is ever left
+#   undefined and src/nsx_ethos_u_semaphore.c.obj & friends are never pulled in.
+#   The upstream malloc()-based semaphore and no-op cache maintenance win, and
+#   nothing about the link fails loudly. Reproduce the old behaviour with:
+#       arm-none-eabi-ld -r app.o libnsx_ethos_u_driver.a   # -> only 3 members
+#
+#   Fix: the override TUs are compiled into an OBJECT library whose object
+#   files are attached to `nsx_ethos_u_driver`'s link interface. Object files
+#   named on a link line are unconditionally included, so the strong
+#   definitions are always present and beat the archive's weak ones. This is
+#   toolchain-independent (no -Wl,-u / --whole-archive / --undefined tricks,
+#   which are gcc/armlink-specific and, for -u, would need per-TU anchor
+#   symbols because -u on an *overridden* name is satisfied by the weak
+#   definition in the already-extracted ethosu_driver.c.obj).
+#
+#   Consequence for non-CMake consumers: linking libnsx_ethos_u_driver.a on a
+#   hand-written link line is NOT enough. Also name the installed override
+#   objects (see the install() rules at the bottom) on the link line.
+#
+#   Consequence for CMake consumers: A LIBRARY THAT RE-EXPORTS THIS DRIVER TO
+#   ITS OWN DEPENDENTS MUST LINK IT **PUBLIC**.
+#
+#       # correct: the override objects reach anything linking my_middle_lib
+#       target_link_libraries(my_middle_lib PUBLIC  nsx::ethos_u_driver)
+#
+#       # WRONG: silently loses the overrides for my_middle_lib's dependents
+#       target_link_libraries(my_middle_lib PRIVATE nsx::ethos_u_driver)
+#
+#   The override objects travel as INTERFACE_SOURCES, and PRIVATE linkage
+#   wraps the dependency in $<LINK_ONLY:...>, which propagates the link
+#   requirement but strips every usage requirement -- INTERFACE_SOURCES
+#   included. The archive still gets linked, so the final executable builds
+#   and runs; it just quietly runs on upstream's weak malloc()-based semaphore
+#   and no-op cache maintenance again. There is no warning and no error, on
+#   any generator. (PRIVATE is fine on a *final* target -- an executable, or a
+#   library nothing else links -- because there is no dependent left to
+#   propagate to.)
+#
+#   tests/smoke/CMakeLists.txt pins this down with a three-level acceptance
+#   build (executable -> STATIC middle library -> nsx::ethos_u_driver) that
+#   runs check_overrides.cmake on the final image; flipping that middle
+#   library's linkage to PRIVATE fails it.
 #
 # Approach (B): explicit source listing.
 #
@@ -26,14 +80,24 @@
 #   `add_subdirectory()` upstream. Instead we list its sources here and let
 #   the active SoC-flags target carry the CPU/FPU/ABI flags transitively.
 #
-#   The upstream config headers (`src/ethosu_config_uX5.h`) still need a
-#   compile-time NPU family selector, which we provide via
-#   `ETHOSU_TARGET_NPU_CONFIG`. The per-NPU device backend
-#   (`ethosu_device_uXX.cc`) is selected from the family token below.
+#   Upstream source still needs a compile-time NPU family selector, which we
+#   provide as `ETHOSU_ARCH` plus the matching `ETHOSU55`/`ETHOSU65`/`ETHOSU85`
+#   define (this is what `src/ethosu_interface.h` and the config headers
+#   actually gate on). The per-NPU device backend (`ethosu_device_uXX.c`) is
+#   selected from the family token below.
 #
 # If you ever need to re-evaluate this trade-off, the pivot point is whether
 # upstream's CMakeLists begins to bake in flag generation we can't easily
 # replicate. As of ethos-u-core-driver 25.x it does not.
+
+# CMAKE_INSTALL_LIBDIR / CMAKE_INSTALL_INCLUDEDIR are used by the install()
+# rules and by the INSTALL_INTERFACE generator expressions below. Nothing
+# defines them by default: a parent project that never included GNUInstallDirs
+# would leave them empty, turning every DESTINATION into an absolute path
+# ("/nsx/modules/...") that escapes CMAKE_INSTALL_PREFIX entirely. Include it
+# here so the module is self-sufficient; it is idempotent when the parent
+# already did.
+include(GNUInstallDirs)
 
 if(NOT TARGET nsx::soc_flags)
     message(FATAL_ERROR
@@ -69,6 +133,19 @@ option(NSX_ETHOSU_BUILD_PMU
 # lives in the driver's private src/ include dir, so no consumer TU sees it.
 option(NSX_ETHOSU_LOG_ENABLE
     "Enable upstream ethos-u-core-driver LOG()/fprintf-based logging" OFF)
+
+# Deadline used by upstream's ethosu_wait() when it blocks on the inference
+# semaphore (ethosu_driver.c consumes ETHOSU_SEMAPHORE_WAIT_INFERENCE at *lib*
+# compile time, so an app-side #define is inert -- it has to be set here).
+#
+# Empty (default) = leave upstream's default of ETHOSU_SEMAPHORE_WAIT_FOREVER
+# in place. Set to a positive integer number of MILLISECONDS to bound the wait;
+# that only takes effect once the application also supplies the
+# nsx_ethos_u_ticks()/nsx_ethos_u_ticks_per_ms() timebase hooks (see
+# includes-api/nsx_ethos_u.h) -- without them a finite value still waits
+# forever, exactly as upstream does.
+set(NSX_ETHOSU_INFERENCE_TIMEOUT_MS "" CACHE STRING
+    "Inference-wait timeout in ms for ethosu_wait() (empty = wait forever)")
 
 # Parse the family (u55 / u65 / u85) from the config string. Used both to
 # pick the device backend source and to set per-family compile defines that
@@ -150,33 +227,149 @@ endforeach()
 # Library target
 # ----------------------------------------------------------------------------
 
-add_library(nsx_ethos_u_driver STATIC
-    ${_NSX_ETHOSU_UPSTREAM_SOURCES}
-    ${CMAKE_CURRENT_LIST_DIR}/src/nsx_ethos_u.c
-    ${CMAKE_CURRENT_LIST_DIR}/src/nsx_ethos_u_cache.c
-    ${CMAKE_CURRENT_LIST_DIR}/src/nsx_ethos_u_callbacks.c
-    ${CMAKE_CURRENT_LIST_DIR}/src/nsx_ethos_u_remap.c
-)
-set_target_properties(nsx_ethos_u_driver PROPERTIES EXPORT_NAME ethos_u_driver)
-add_library(nsx::ethos_u_driver ALIAS nsx_ethos_u_driver)
-
-target_compile_definitions(nsx_ethos_u_driver PUBLIC
+# Usage requirements shared by the archive and the override OBJECT library.
+# Held in variables rather than a helper INTERFACE target so the exported
+# target set stays exactly what it was.
+set(_NSX_ETHOSU_PUBLIC_DEFS
     ETHOSU
     ETHOSU_ARCH=${NSX_ETHOSU_FAMILY}
     ETHOSU_MACS=${NSX_ETHOSU_MACS}
     ${NSX_ETHOSU_DEVICE_DEFINE}
     NSX_HAS_NPU=1
     NSX_ETHOSU_NPU_FAMILY_${NSX_ETHOSU_FAMILY}=1
-    # Upstream consumes this string (quoted) in its config header to gate
-    # NPU-specific code paths. Keep it on the PUBLIC interface so apps that
-    # include `ethosu_driver.h` directly see the same value.
-    ETHOSU_TARGET_NPU_CONFIG="${NSX_ETHOSU_NPU_CONFIG}"
+)
+if(NOT NSX_ETHOSU_INFERENCE_TIMEOUT_MS STREQUAL "")
+    if(NOT NSX_ETHOSU_INFERENCE_TIMEOUT_MS MATCHES "^[0-9]+$")
+        message(FATAL_ERROR
+            "nsx-ethos-u-driver: NSX_ETHOSU_INFERENCE_TIMEOUT_MS="
+            "'${NSX_ETHOSU_INFERENCE_TIMEOUT_MS}' must be a positive "
+            "integer number of milliseconds (or empty for 'wait forever').")
+    endif()
+    # Range/zero check. Strip leading zeros first so "007" and "0000" behave,
+    # then bound the digit count before any numeric compare -- CMake's GREATER
+    # is a 64-bit signed compare and silently misreads an absurdly long literal.
+    string(REGEX REPLACE "^0+(.)" "\\1" _NSX_ETHOSU_TIMEOUT_N
+        "${NSX_ETHOSU_INFERENCE_TIMEOUT_MS}")
+    string(LENGTH "${_NSX_ETHOSU_TIMEOUT_N}" _NSX_ETHOSU_TIMEOUT_LEN)
+    if(_NSX_ETHOSU_TIMEOUT_N STREQUAL "0")
+        # 0 is not "no timeout", it is "already expired": upstream's wait loop
+        # would fail the very first deadline check on every inference and mark
+        # every job ETHOSU_JOB_RESULT_TIMEOUT + soft-reset the NPU. Anyone
+        # reaching for 0 means "wait forever", which is spelled "" here.
+        message(FATAL_ERROR
+            "nsx-ethos-u-driver: NSX_ETHOSU_INFERENCE_TIMEOUT_MS=0 would time "
+            "out every inference instantly. Use a positive number of "
+            "milliseconds, or leave it empty to wait forever.")
+    endif()
+    if(_NSX_ETHOSU_TIMEOUT_LEN GREATER 10
+       OR (_NSX_ETHOSU_TIMEOUT_LEN EQUAL 10
+           AND _NSX_ETHOSU_TIMEOUT_N GREATER 4294967295))
+        # The macro is a uint64_t timeout, so nothing here overflows at the C
+        # level -- this is a typo guard. uint32_t ms is ~49.7 days, which no
+        # inference deadline means on purpose, and capping there keeps the
+        # value clear of ETHOSU_SEMAPHORE_WAIT_FOREVER (UINT64_MAX): a
+        # near-sentinel literal would look bounded to the build and behave
+        # unbounded at runtime.
+        message(FATAL_ERROR
+            "nsx-ethos-u-driver: NSX_ETHOSU_INFERENCE_TIMEOUT_MS="
+            "'${NSX_ETHOSU_INFERENCE_TIMEOUT_MS}' exceeds the supported "
+            "maximum of 4294967295 ms. Leave it empty to wait forever.")
+    endif()
+    # PUBLIC, not PRIVATE: ethosu_driver.c consumes the macro, but
+    # ethosu_driver.h *defines* the fallback under #ifndef and is on the public
+    # include path. A PRIVATE define would leave any consumer TU that includes
+    # ethosu_driver.h reading WAIT_FOREVER while the library was compiled with
+    # the bounded value -- a silent header/library disagreement.
+    list(APPEND _NSX_ETHOSU_PUBLIC_DEFS
+        ETHOSU_SEMAPHORE_WAIT_INFERENCE=${NSX_ETHOSU_INFERENCE_TIMEOUT_MS}ULL)
+endif()
+
+set(_NSX_ETHOSU_PUBLIC_INCS
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/includes-api>
+    $<BUILD_INTERFACE:${_NSX_ETHOSU_VENDOR_INC}>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/nsx/modules/nsx-ethos-u-driver/includes-api>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/nsx/modules/nsx-ethos-u-driver/ethos-u-core-driver/include>
 )
 
-# `ETHOS_U_NPU_CONFIG_ID` is the form used by some upstream headers without
-# the leading "ethos-" prefix; harmless to expose both.
+set(_NSX_ETHOSU_DEPS
+    nsx::soc_flags
+    nsx::cmsis_core
+    nsx::core
+    nsx::soc_hal
+)
+
+# ---- Override TUs: OBJECT library (see "LINK SEMANTICS" at the top) --------
+#
+# These four TUs each provide a *strong* definition that must displace an
+# upstream weak one. They are deliberately NOT archive members.
+set(_NSX_ETHOSU_OVERRIDE_SOURCES
+    ${CMAKE_CURRENT_LIST_DIR}/src/nsx_ethos_u_cache.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/nsx_ethos_u_callbacks.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/nsx_ethos_u_remap.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/nsx_ethos_u_semaphore.c
+)
+add_library(nsx_ethos_u_overrides OBJECT ${_NSX_ETHOSU_OVERRIDE_SOURCES})
+# No EXPORT_NAME / install(TARGETS): this target is not part of nsxTargets. Its
+# objects reach installed consumers as plain files (install(FILES) below) named
+# from nsx_ethos_u_driver's INSTALL_INTERFACE sources. The alias exists so a
+# BSP can reach the target to add flags, not so anything links it.
+add_library(nsx::ethos_u_overrides ALIAS nsx_ethos_u_overrides)
+target_compile_definitions(nsx_ethos_u_overrides PRIVATE ${_NSX_ETHOSU_PUBLIC_DEFS})
+target_include_directories(nsx_ethos_u_overrides PRIVATE ${_NSX_ETHOSU_PUBLIC_INCS})
+target_link_libraries(nsx_ethos_u_overrides PRIVATE ${_NSX_ETHOSU_DEPS})
+
+# ---- The archive ----------------------------------------------------------
+
+add_library(nsx_ethos_u_driver STATIC
+    ${_NSX_ETHOSU_UPSTREAM_SOURCES}
+    ${CMAKE_CURRENT_LIST_DIR}/src/nsx_ethos_u.c
+)
+set_target_properties(nsx_ethos_u_driver PROPERTIES EXPORT_NAME ethos_u_driver)
+add_library(nsx::ethos_u_driver ALIAS nsx_ethos_u_driver)
+
+# Attach the override objects to the *link interface*, i.e. to every consumer's
+# link line, and deliberately NOT to the archive itself.
+#
+#   * `target_link_libraries(... PUBLIC nsx_ethos_u_overrides)` is NOT enough:
+#     CMake resolves that by dropping the objects into libnsx_ethos_u_driver.a,
+#     where they are back to being never-extracted dead members.
+#   * Exporting the OBJECT library and naming it in INTERFACE_LINK_LIBRARIES is
+#     also NOT enough: an IMPORTED OBJECT library reached through a link
+#     interface contributes nothing to the consumer's link line either.
+#   * INTERFACE_SOURCES carrying object-file paths is what actually works. The
+#     build-tree half uses $<TARGET_OBJECTS:...>; the install-tree half names
+#     the objects at their installed location (install(FILES) below puts them
+#     there under names we control, rather than the generator-dependent
+#     objects[-CONFIG]/<target>/ layout install(TARGETS ... OBJECTS) uses).
+set(_NSX_ETHOSU_OBJ_INSTALL_DIR
+    ${CMAKE_INSTALL_LIBDIR}/nsx/modules/nsx-ethos-u-driver/objects)
+set(_NSX_ETHOSU_INSTALLED_OBJECTS "")
+foreach(_src IN LISTS _NSX_ETHOSU_OVERRIDE_SOURCES)
+    get_filename_component(_obj_name "${_src}" NAME)
+    list(APPEND _NSX_ETHOSU_INSTALLED_OBJECTS
+        "$<INSTALL_INTERFACE:${_NSX_ETHOSU_OBJ_INSTALL_DIR}/${_obj_name}${CMAKE_C_OUTPUT_EXTENSION}>")
+endforeach()
+
+target_sources(nsx_ethos_u_driver INTERFACE
+    $<BUILD_INTERFACE:$<TARGET_OBJECTS:nsx_ethos_u_overrides>>
+    ${_NSX_ETHOSU_INSTALLED_OBJECTS}
+)
+# Consumers reference the build-tree objects by path, so make sure they exist
+# before anything links against the archive.
+add_dependencies(nsx_ethos_u_driver nsx_ethos_u_overrides)
+
+target_compile_definitions(nsx_ethos_u_driver PUBLIC ${_NSX_ETHOSU_PUBLIC_DEFS})
+
+# NOTE: `ETHOSU_TARGET_NPU_CONFIG` and `ETHOSU_TARGET_NPU` used to be defined
+# here with a comment claiming upstream's config headers consumed them. They do
+# not. `ETHOSU_TARGET_NPU_CONFIG` is a *CMake cache variable* read only by
+# upstream's own CMakeLists.txt (which we deliberately do not
+# add_subdirectory(); see the header comment), and `ETHOSU_TARGET_NPU` appears
+# nowhere in the vendored tree at all. Verify with:
+#     git grep -n ETHOSU_TARGET_NPU external/
+# The gating that upstream source *does* perform is on ETHOSU_ARCH / ETHOSU55 /
+# ETHOSU65 / ETHOSU85, all set above.
 target_compile_definitions(nsx_ethos_u_driver PRIVATE
-    ETHOSU_TARGET_NPU=${NSX_ETHOSU_FAMILY_NUM}
     ETHOSU_LOG_ENABLE=$<BOOL:${NSX_ETHOSU_LOG_ENABLE}>
 )
 
@@ -190,12 +383,7 @@ if(NOT NSX_ETHOSU_LOG_ENABLE)
     )
 endif()
 
-target_include_directories(nsx_ethos_u_driver PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/includes-api>
-    $<BUILD_INTERFACE:${_NSX_ETHOSU_VENDOR_INC}>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/nsx/modules/nsx-ethos-u-driver/includes-api>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/nsx/modules/nsx-ethos-u-driver/ethos-u-core-driver/include>
-)
+target_include_directories(nsx_ethos_u_driver PUBLIC ${_NSX_ETHOSU_PUBLIC_INCS})
 
 # Upstream's src/ headers (e.g. ethosu_config_u85.h) are reachable from the
 # upstream TUs via relative include; they don't need to be on the public
@@ -204,12 +392,7 @@ target_include_directories(nsx_ethos_u_driver PRIVATE
     ${_NSX_ETHOSU_VENDOR_SRC}
 )
 
-target_link_libraries(nsx_ethos_u_driver PUBLIC
-    nsx::soc_flags
-    nsx::cmsis_core
-    nsx::core
-    nsx::soc_hal
-)
+target_link_libraries(nsx_ethos_u_driver PUBLIC ${_NSX_ETHOSU_DEPS})
 
 # ----------------------------------------------------------------------------
 # Install
@@ -222,3 +405,11 @@ install(DIRECTORY ${_NSX_ETHOSU_VENDOR_INC}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nsx/modules/nsx-ethos-u-driver/ethos-u-core-driver
 )
 install(TARGETS nsx_ethos_u_driver EXPORT nsxTargets)
+
+# The override objects ship next to the archive: an installed consumer that
+# links nsx::ethos_u_driver must still receive them on its link line, or it
+# silently gets upstream's weak malloc() semaphore and no-op cache maintenance
+# back. These paths are what the $<INSTALL_INTERFACE:> sources above resolve to.
+install(FILES $<TARGET_OBJECTS:nsx_ethos_u_overrides>
+    DESTINATION ${_NSX_ETHOSU_OBJ_INSTALL_DIR}
+)
