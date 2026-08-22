@@ -123,6 +123,73 @@ else()
         "acceptance check.")
 endif()
 
+# ----------------------------------------------------------------------------
+# Three-level acceptance: do the overrides survive a re-exporting middle layer?
+# ----------------------------------------------------------------------------
+#
+#   nsx_ethos_u_link_transitive (exe)  ->  nsx_ethos_u_smoke_middle (STATIC)
+#                                              ->  nsx::ethos_u_driver
+#
+# The application names ONLY the middle library. This is how the driver is
+# actually consumed in the field (an app links a BSP/HAL wrapper, not the
+# driver), and it is the one topology where the override mechanism can fail
+# silently: the objects ride on the driver's INTERFACE_SOURCES, and a middle
+# library that links the driver PRIVATE wraps it in $<LINK_ONLY:>, which
+# propagates the *link* requirement but strips every usage requirement --
+# sources included. The executable then links fine and quietly runs on
+# upstream's weak malloc() semaphore and no-op cache maintenance.
+#
+# NSX_ETHOSU_SMOKE_MIDDLE_LINK exists to make that failure reproducible on
+# demand rather than by hand-editing this file:
+#
+#   cmake -S tests/smoke -B build/smoke-private -DNSX_ETHOSU_SMOKE_MIDDLE_LINK=PRIVATE
+#   cmake --build build/smoke-private --target nsx_ethos_u_link_transitive
+#   # -> check_overrides.cmake fails: every ethosu_* hook resolved WEAK.
+#
+# PUBLIC is the default and the only value CI builds.
+set(NSX_ETHOSU_SMOKE_MIDDLE_LINK "PUBLIC" CACHE STRING
+    "Linkage the smoke middle library uses for nsx::ethos_u_driver (PUBLIC is \
+correct; PRIVATE reproduces the silent override-loss failure)")
+set_property(CACHE NSX_ETHOSU_SMOKE_MIDDLE_LINK PROPERTY STRINGS PUBLIC PRIVATE)
+if(NOT NSX_ETHOSU_SMOKE_MIDDLE_LINK MATCHES "^(PUBLIC|PRIVATE)$")
+    message(FATAL_ERROR
+        "NSX_ETHOSU_SMOKE_MIDDLE_LINK must be PUBLIC or PRIVATE, got "
+        "'${NSX_ETHOSU_SMOKE_MIDDLE_LINK}'.")
+endif()
+
+add_library(nsx_ethos_u_smoke_middle STATIC link_middle.c)
+target_link_libraries(nsx_ethos_u_smoke_middle
+    ${NSX_ETHOSU_SMOKE_MIDDLE_LINK} nsx::ethos_u_driver)
+target_include_directories(nsx_ethos_u_smoke_middle
+    PUBLIC "${CMAKE_CURRENT_LIST_DIR}"
+    PRIVATE "${NSX_ETHOSU_SMOKE_STUBS}")
+
+add_executable(nsx_ethos_u_link_transitive link_transitive.c)
+# Deliberately NOT nsx::ethos_u_driver: the middle library is the only thing
+# named here, exactly as an application would.
+target_link_libraries(nsx_ethos_u_link_transitive PRIVATE nsx_ethos_u_smoke_middle)
+target_link_options(nsx_ethos_u_link_transitive PRIVATE -nostdlib -nostartfiles -Wl,-r)
+set_target_properties(nsx_ethos_u_link_transitive PROPERTIES LINKER_LANGUAGE C)
+
+if(NSX_ETHOSU_NM)
+    add_custom_command(TARGET nsx_ethos_u_link_transitive POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            -DNM=${NSX_ETHOSU_NM}
+            -DOBJECT_FILE=$<TARGET_FILE:nsx_ethos_u_link_transitive>
+            -P "${CMAKE_CURRENT_LIST_DIR}/check_overrides.cmake"
+        VERBATIM
+        COMMENT "Checking NSX overrides survive a re-exporting middle library")
+
+    # Same check again, as a ctest case. The POST_BUILD run is the hard gate
+    # (it fails the cross build too, where ctest is never invoked); this one
+    # exists so the topology shows up as a named result in the host test
+    # report instead of being invisible when everything passes.
+    add_test(NAME link_overrides_win_transitive COMMAND ${CMAKE_COMMAND}
+        -DNM=${NSX_ETHOSU_NM}
+        -DOBJECT_FILE=$<TARGET_FILE:nsx_ethos_u_link_transitive>
+        -P "${CMAKE_CURRENT_LIST_DIR}/check_overrides.cmake")
+endif()
+
 # A link-time smoke check: pulling ethosu_init() out of the archive drags in
 # the bulk of the driver and proves there are no undefined references beyond
 # the ones an application is expected to supply. It then exercises the

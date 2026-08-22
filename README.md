@@ -86,7 +86,7 @@ Set in your board (or app) before adding the module:
 | `NSX_ETHOSU_NPU_CONFIG` | `ethos-u85-256` | Vela / driver NPU config (`ethos-uNN-MACS`). |
 | `NSX_ETHOSU_BUILD_PMU` | `ON` | Build the upstream PMU helper TU. |
 | `NSX_ETHOSU_LOG_ENABLE` | `OFF` | Enable upstream `LOG()`/`fprintf` driver logging. |
-| `NSX_ETHOSU_INFERENCE_TIMEOUT_MS` | *(empty)* | Deadline in ms for `ethosu_wait()`. Empty = upstream's "wait forever". |
+| `NSX_ETHOSU_INFERENCE_TIMEOUT_MS` | *(empty)* | Deadline in ms for `ethosu_wait()`. Empty = upstream's "wait forever"; otherwise 1…4294967295 (0 is rejected — it would time out every inference instantly). |
 
 The CMakeLists parses the family token (`u55` / `u65` / `u85`) from
 `NSX_ETHOSU_NPU_CONFIG` and selects the matching `ethosu_device_uNN`
@@ -110,6 +110,24 @@ as upstream behaves.
 ```cmake
 target_link_libraries(my_app PRIVATE nsx::ethos_u_driver)
 ```
+
+`PRIVATE` is correct for a **final** target (an executable, or a library
+nothing else links). A library that re-exports the driver to its own
+dependents — a BSP or HAL wrapper — **must** link it `PUBLIC`:
+
+```cmake
+target_link_libraries(my_bsp PUBLIC nsx::ethos_u_driver)   # correct
+target_link_libraries(my_bsp PRIVATE nsx::ethos_u_driver)  # silently broken
+```
+
+The weak-symbol overrides reach a link line as object files carried on the
+driver's `INTERFACE_SOURCES`. `PRIVATE` wraps the dependency in
+`$<LINK_ONLY:...>`, which propagates the link requirement but strips every
+usage requirement, sources included — so `my_bsp`'s dependents link the
+archive without the overrides and quietly fall back to upstream's
+`malloc()`-based semaphore and no-op cache maintenance. There is no warning.
+`tests/smoke` builds this exact topology (`nsx_ethos_u_link_transitive`) and
+fails the build if the overrides go missing.
 
 Minimal app code:
 

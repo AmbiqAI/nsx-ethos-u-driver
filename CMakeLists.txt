@@ -45,6 +45,30 @@
 #   hand-written link line is NOT enough. Also name the installed override
 #   objects (see the install() rules at the bottom) on the link line.
 #
+#   Consequence for CMake consumers: A LIBRARY THAT RE-EXPORTS THIS DRIVER TO
+#   ITS OWN DEPENDENTS MUST LINK IT **PUBLIC**.
+#
+#       # correct: the override objects reach anything linking my_middle_lib
+#       target_link_libraries(my_middle_lib PUBLIC  nsx::ethos_u_driver)
+#
+#       # WRONG: silently loses the overrides for my_middle_lib's dependents
+#       target_link_libraries(my_middle_lib PRIVATE nsx::ethos_u_driver)
+#
+#   The override objects travel as INTERFACE_SOURCES, and PRIVATE linkage
+#   wraps the dependency in $<LINK_ONLY:...>, which propagates the link
+#   requirement but strips every usage requirement -- INTERFACE_SOURCES
+#   included. The archive still gets linked, so the final executable builds
+#   and runs; it just quietly runs on upstream's weak malloc()-based semaphore
+#   and no-op cache maintenance again. There is no warning and no error, on
+#   any generator. (PRIVATE is fine on a *final* target -- an executable, or a
+#   library nothing else links -- because there is no dependent left to
+#   propagate to.)
+#
+#   tests/smoke/CMakeLists.txt pins this down with a three-level acceptance
+#   build (executable -> STATIC middle library -> nsx::ethos_u_driver) that
+#   runs check_overrides.cmake on the final image; flipping that middle
+#   library's linkage to PRIVATE fails it.
+#
 # Approach (B): explicit source listing.
 #
 #   Upstream's own CMakeLists.txt drives target-CPU selection via
@@ -65,6 +89,15 @@
 # If you ever need to re-evaluate this trade-off, the pivot point is whether
 # upstream's CMakeLists begins to bake in flag generation we can't easily
 # replicate. As of ethos-u-core-driver 25.x it does not.
+
+# CMAKE_INSTALL_LIBDIR / CMAKE_INSTALL_INCLUDEDIR are used by the install()
+# rules and by the INSTALL_INTERFACE generator expressions below. Nothing
+# defines them by default: a parent project that never included GNUInstallDirs
+# would leave them empty, turning every DESTINATION into an absolute path
+# ("/nsx/modules/...") that escapes CMAKE_INSTALL_PREFIX entirely. Include it
+# here so the module is self-sufficient; it is idempotent when the parent
+# already did.
+include(GNUInstallDirs)
 
 if(NOT TARGET nsx::soc_flags)
     message(FATAL_ERROR
@@ -209,8 +242,38 @@ if(NOT NSX_ETHOSU_INFERENCE_TIMEOUT_MS STREQUAL "")
     if(NOT NSX_ETHOSU_INFERENCE_TIMEOUT_MS MATCHES "^[0-9]+$")
         message(FATAL_ERROR
             "nsx-ethos-u-driver: NSX_ETHOSU_INFERENCE_TIMEOUT_MS="
-            "'${NSX_ETHOSU_INFERENCE_TIMEOUT_MS}' must be a non-negative "
+            "'${NSX_ETHOSU_INFERENCE_TIMEOUT_MS}' must be a positive "
             "integer number of milliseconds (or empty for 'wait forever').")
+    endif()
+    # Range/zero check. Strip leading zeros first so "007" and "0000" behave,
+    # then bound the digit count before any numeric compare -- CMake's GREATER
+    # is a 64-bit signed compare and silently misreads an absurdly long literal.
+    string(REGEX REPLACE "^0+(.)" "\\1" _NSX_ETHOSU_TIMEOUT_N
+        "${NSX_ETHOSU_INFERENCE_TIMEOUT_MS}")
+    string(LENGTH "${_NSX_ETHOSU_TIMEOUT_N}" _NSX_ETHOSU_TIMEOUT_LEN)
+    if(_NSX_ETHOSU_TIMEOUT_N STREQUAL "0")
+        # 0 is not "no timeout", it is "already expired": upstream's wait loop
+        # would fail the very first deadline check on every inference and mark
+        # every job ETHOSU_JOB_RESULT_TIMEOUT + soft-reset the NPU. Anyone
+        # reaching for 0 means "wait forever", which is spelled "" here.
+        message(FATAL_ERROR
+            "nsx-ethos-u-driver: NSX_ETHOSU_INFERENCE_TIMEOUT_MS=0 would time "
+            "out every inference instantly. Use a positive number of "
+            "milliseconds, or leave it empty to wait forever.")
+    endif()
+    if(_NSX_ETHOSU_TIMEOUT_LEN GREATER 10
+       OR (_NSX_ETHOSU_TIMEOUT_LEN EQUAL 10
+           AND _NSX_ETHOSU_TIMEOUT_N GREATER 4294967295))
+        # The macro is a uint64_t timeout, so nothing here overflows at the C
+        # level -- this is a typo guard. uint32_t ms is ~49.7 days, which no
+        # inference deadline means on purpose, and capping there keeps the
+        # value clear of ETHOSU_SEMAPHORE_WAIT_FOREVER (UINT64_MAX): a
+        # near-sentinel literal would look bounded to the build and behave
+        # unbounded at runtime.
+        message(FATAL_ERROR
+            "nsx-ethos-u-driver: NSX_ETHOSU_INFERENCE_TIMEOUT_MS="
+            "'${NSX_ETHOSU_INFERENCE_TIMEOUT_MS}' exceeds the supported "
+            "maximum of 4294967295 ms. Leave it empty to wait forever.")
     endif()
     # PUBLIC, not PRIVATE: ethosu_driver.c consumes the macro, but
     # ethosu_driver.h *defines* the fallback under #ifndef and is on the public

@@ -23,6 +23,17 @@
  *     manage the driver handle themselves),
  *   - optionally overriding `ethosu_address_remap()` for SoCs whose
  *     base-pointer aperture differs from the CPU view (e.g. DRAM).
+ *
+ * @note Overriding `ethosu_address_remap()` has a linkage requirement. The
+ *       BSP's strong definition must reach the final link line as an OBJECT
+ *       file (or sit in a static-archive member that is extracted anyway
+ *       because the application references some other symbol from that same
+ *       TU). A strong definition alone in an archive member is never
+ *       extracted -- nothing in the link is undefined without it, since both
+ *       this module and upstream define the symbol weakly -- so the weak
+ *       identity remap silently wins and the NPU sees CPU-view addresses with
+ *       no link error. See `src/nsx_ethos_u_remap.c` for the details and for
+ *       the `nm` one-liner that checks a real image.
  */
 
 #ifndef NSX_ETHOS_U_H
@@ -144,6 +155,15 @@ void nsx_ethos_u_irq(void);
  *   It is called from the semaphore wait loop and must be safe to call from
  *   any context and must not block.
  *
+ * - `nsx_ethos_u_ticks()` must **never return 0 once the timebase is
+ *   running**. 0 is the "no timebase" sentinel: the wait loop samples it twice
+ *   at entry and reads two zeros as "no time source", degrading to an
+ *   unbounded wait. A counter that is legitimately 0 for the first few ticks
+ *   after reset (or that is read before its clock is enabled) would therefore
+ *   silently disable every inference timeout. Bias the value so it cannot be
+ *   zero, e.g. `return counter | 1;` or `return counter + 1;` -- both cost one
+ *   instruction and neither perturbs elapsed-time differences.
+ *
  * - `nsx_ethos_u_ticks_per_ms()` returns the tick rate in ticks per
  *   millisecond, or **0 to declare that no time source exists**.
  *
@@ -199,8 +219,10 @@ void nsx_ethos_u_irq(void);
  */
 
 /**
- * @return Monotonic tick count that wraps only at 2^64; 0 from the weak
- *         default. Software-extend any narrower hardware counter.
+ * @return Monotonic tick count that wraps only at 2^64, and never 0 once the
+ *         timebase is running (0 is the no-timebase sentinel, and is what the
+ *         weak default returns). Software-extend any narrower hardware
+ *         counter.
  */
 uint64_t nsx_ethos_u_ticks(void);
 

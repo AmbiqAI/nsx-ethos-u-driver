@@ -188,6 +188,17 @@ static int nsx_sem_try_take_or_sleep(struct nsx_ethos_u_sem *s) {
         return 1;
     }
     nsx_sem_crit_exit(primask);
+    /*
+     * Defence in depth: Armv8-M does not guarantee that a PRIMASK write is
+     * context-synchronizing, so without a barrier the architecture permits the
+     * WFE to be observed before the unmask takes effect -- i.e. sleeping with
+     * interrupts still masked, the hang described above. Real Cortex-M cores
+     * self-synchronize MSR PRIMASK, so this is not a bug we have observed; the
+     * __ISB() makes the ordering architecturally guaranteed instead of
+     * implementation-dependent, and costs a single non-speculative cycle on a
+     * path that is about to sleep anyway.
+     */
+    __ISB();
     __WFE();
     return 0;
 }
