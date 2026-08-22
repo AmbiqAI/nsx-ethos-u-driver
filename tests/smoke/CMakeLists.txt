@@ -29,7 +29,9 @@
 #   ctest --test-dir build/smoke --output-on-failure
 #
 # It also configures cleanly under arm-none-eabi-gcc if a toolchain file is
-# supplied; the stubs emit real inline-asm intrinsics when __ARM_ARCH is set.
+# supplied; the stubs emit real inline-asm intrinsics when the compiler reports
+# an M-profile target (__ARM_ARCH_PROFILE == 'M') -- deliberately not plain
+# __ARM_ARCH, which an aarch64 build host defines too.
 
 cmake_minimum_required(VERSION 3.20)
 project(nsx_ethos_u_smoke C)
@@ -77,23 +79,72 @@ add_subdirectory("${NSX_ETHOSU_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/nsx-ethos-u-d
 # is provenance-protected.
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     file(GLOB _nsx_own_sources CONFIGURE_DEPENDS "${NSX_ETHOSU_ROOT}/src/*.c")
+    # The override TUs live in the nsx_ethos_u_overrides OBJECT library now, so
+    # both targets have to be named or half of src/ would drop off -Werror.
     set_source_files_properties(${_nsx_own_sources}
-        TARGET_DIRECTORY nsx_ethos_u_driver
+        TARGET_DIRECTORY nsx_ethos_u_driver nsx_ethos_u_overrides
         PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
+endif()
+
+# ----------------------------------------------------------------------------
+# Override acceptance: did the strong src/ definitions actually win the link?
+# ----------------------------------------------------------------------------
+#
+# link_acceptance.c references only ethosu_init() and nsx_ethos_u_init() -- no
+# hook addresses -- so it reproduces a plain application link exactly. The
+# check itself lives in check_overrides.cmake and reads the symbol table.
+#
+# This is a *partial* (-r) link so it needs no startup code, linker script or
+# syscall stubs, which means it runs in the cross build too -- the one that
+# matters, since bare-metal arm-none-eabi is where the module ships.
+add_executable(nsx_ethos_u_link_acceptance link_acceptance.c)
+target_link_libraries(nsx_ethos_u_link_acceptance PRIVATE nsx::ethos_u_driver)
+target_include_directories(nsx_ethos_u_link_acceptance PRIVATE "${NSX_ETHOSU_SMOKE_STUBS}")
+target_link_options(nsx_ethos_u_link_acceptance PRIVATE -nostdlib -nostartfiles -Wl,-r)
+set_target_properties(nsx_ethos_u_link_acceptance PROPERTIES
+    # -r output is a relocatable object, not an image; skip any link check that
+    # would expect an entry point.
+    LINKER_LANGUAGE C)
+
+find_program(NSX_ETHOSU_NM
+    NAMES ${CMAKE_NM} "${CMAKE_C_COMPILER_TARGET}-nm" nm
+    HINTS "${_NSX_ETHOSU_TOOLCHAIN_BIN}")
+if(NSX_ETHOSU_NM)
+    add_custom_command(TARGET nsx_ethos_u_link_acceptance POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            -DNM=${NSX_ETHOSU_NM}
+            -DOBJECT_FILE=$<TARGET_FILE:nsx_ethos_u_link_acceptance>
+            -P "${CMAKE_CURRENT_LIST_DIR}/check_overrides.cmake"
+        VERBATIM
+        COMMENT "Checking NSX overrides beat upstream's weak definitions")
+else()
+    message(WARNING
+        "nsx-ethos-u-driver smoke: no nm found; skipping the override "
+        "acceptance check.")
 endif()
 
 # A link-time smoke check: pulling ethosu_init() out of the archive drags in
 # the bulk of the driver and proves there are no undefined references beyond
-# the ones an application is expected to supply.
+# the ones an application is expected to supply. It then exercises the
+# overrides through *behaviour* (see link_smoke.c) so a regression to
+# upstream's weak defaults fails the run, not just the symbol table.
 #
 # Skipped when cross-compiling: a bare-metal arm-none-eabi link needs startup
 # code, a linker script and syscall stubs that this harness deliberately does
-# not carry. The static library itself still builds in that mode.
+# not carry. The static library and the acceptance check above still run in
+# that mode.
 if(NOT CMAKE_CROSSCOMPILING)
     add_executable(nsx_ethos_u_link_smoke link_smoke.c)
     target_link_libraries(nsx_ethos_u_link_smoke PRIVATE nsx::ethos_u_driver)
     target_include_directories(nsx_ethos_u_link_smoke PRIVATE "${NSX_ETHOSU_SMOKE_STUBS}")
     add_test(NAME link_smoke COMMAND nsx_ethos_u_link_smoke)
+
+    if(NSX_ETHOSU_NM)
+        add_test(NAME link_overrides_win COMMAND ${CMAKE_COMMAND}
+            -DNM=${NSX_ETHOSU_NM}
+            -DOBJECT_FILE=$<TARGET_FILE:nsx_ethos_u_link_smoke>
+            -P "${CMAKE_CURRENT_LIST_DIR}/check_overrides.cmake")
+    endif()
 
     add_subdirectory(unit)
 endif()
