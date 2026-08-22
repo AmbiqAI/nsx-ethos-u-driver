@@ -256,6 +256,38 @@ static void test_pool_recycling(void) {
     ethosu_semaphore_destroy(again);
 }
 
+/*
+ * give() must saturate at UINT32_MAX rather than wrapping the count to zero
+ * and losing every outstanding token. Both the Cortex-M (PRIMASK) and the
+ * host (CAS loop) paths implement this; the host build is what runs here.
+ *
+ * Uses the test-only seam in the TU to park the count at the edge -- four
+ * billion give() calls is not a test.
+ */
+void nsx_ethos_u_sem_test_set_count(void *sem, uint32_t count);
+
+static void test_give_saturates(void) {
+    printf("test_give_saturates\n");
+
+    void *sem = ethosu_semaphore_create();
+    CHECK(sem != NULL, "create returns a handle");
+    if (sem == NULL) {
+        return;
+    }
+
+    nsx_ethos_u_sem_test_set_count(sem, UINT32_MAX - 1U);
+    CHECK(ethosu_semaphore_give(sem) == 0, "give at UINT32_MAX-1 succeeds");
+    CHECK(ethosu_semaphore_give(sem) != 0,
+          "give at UINT32_MAX reports failure instead of wrapping");
+
+    /* If it had wrapped, the count would be 0 and this take would block. */
+    CHECK(ethosu_semaphore_take(sem, ETHOSU_SEMAPHORE_WAIT_FOREVER) == 0,
+          "count survived the saturating give (did not wrap to 0)");
+
+    nsx_ethos_u_sem_test_set_count(sem, 0U);
+    ethosu_semaphore_destroy(sem);
+}
+
 /* Defensive: NULL handles must not fault. */
 static void test_null_handle(void) {
     printf("test_null_handle\n");
@@ -283,6 +315,7 @@ int main(void) {
 #endif
     test_take_blocks_until_give();
     test_pool_recycling();
+    test_give_saturates();
     test_null_handle();
 
     if (failures != 0) {

@@ -131,20 +131,42 @@ void nsx_ethos_u_irq(void);
  *
  * ## Contract
  *
- * - `nsx_ethos_u_ticks()` returns a free-running, monotonic tick count. It is
- *   called from the semaphore wait loop, which may run with interrupts masked
- *   on the `__WFE()` path, so it must be safe to call from any context and
- *   must not block. Reading a hardware counter (SysTick, STIMER, CTIMER) is
- *   the intended implementation. Wraparound is tolerated as long as one wait
- *   is shorter than the counter's period.
+ * - `nsx_ethos_u_ticks()` returns a free-running, monotonic 64-bit tick count
+ *   that **wraps only at 2^64**. The wait loop measures elapsed time as an
+ *   unsigned difference, so a counter that wraps sooner reports a huge elapsed
+ *   span at every wrap and fires spurious timeouts. Hardware counters narrower
+ *   than 64 bits (and counters that count *down*) therefore must NOT be
+ *   returned raw: software-extend them, e.g. accumulate a 64-bit total in the
+ *   counter's own overflow/reload interrupt and add the current sub-count.
+ *   At a realistic tick rate 2^64 ticks is longer than the part will ever be
+ *   powered, so this makes wraparound a non-issue rather than a tolerated one.
+ *
+ *   It is called from the semaphore wait loop and must be safe to call from
+ *   any context and must not block.
  *
  * - `nsx_ethos_u_ticks_per_ms()` returns the tick rate in ticks per
  *   millisecond, or **0 to declare that no time source exists**.
  *
+ * - Supply **both hooks or neither**. Overriding only `ticks_per_ms()` is
+ *   detected (the wait samples `ticks()` twice at entry and treats two zero
+ *   reads as a dead time source) and degrades to an unbounded wait rather than
+ *   spinning forever at 100% CPU on a clock that never advances -- but do not
+ *   rely on that; it is a safety net, not a supported configuration.
+ *
  * - The `timeout` passed to `ethosu_semaphore_take()` is interpreted in
  *   **milliseconds**. Upstream leaves the unit implementation-defined and
- *   ships the value through untouched; NSX picks milliseconds. Set it via the
- *   `ETHOSU_SEMAPHORE_WAIT_INFERENCE` macro (see ethosu_driver.h).
+ *   ships the value through untouched; NSX picks milliseconds.
+ *
+ * ## Setting the inference deadline
+ *
+ * The deadline `ethosu_wait()` uses is the `ETHOSU_SEMAPHORE_WAIT_INFERENCE`
+ * macro, which upstream's `ethosu_driver.c` consumes when *the library* is
+ * compiled. A `#define` in application code is therefore inert. Set it from
+ * the build system instead:
+ *
+ *     cmake -DNSX_ETHOSU_INFERENCE_TIMEOUT_MS=2000 ...
+ *
+ * Empty (the default) leaves upstream's `ETHOSU_SEMAPHORE_WAIT_FOREVER`.
  *
  * ## Default behaviour
  *
@@ -153,7 +175,7 @@ void nsx_ethos_u_irq(void);
  * so integrators without a timebase see no change. Define either or both
  * symbols in application code to override.
  *
- * Once a timebase is supplied *and* `ETHOSU_SEMAPHORE_WAIT_INFERENCE` is
+ * Once a timebase is supplied *and* `NSX_ETHOSU_INFERENCE_TIMEOUT_MS` is
  * finite, a stalled NPU makes `ethosu_semaphore_take()` return -1 after the
  * deadline, which is what lets `ethosu_wait()` mark the job
  * ETHOSU_JOB_RESULT_TIMEOUT and issue `ethosu_soft_reset()`.
@@ -170,10 +192,16 @@ void nsx_ethos_u_irq(void);
  *   interrupt fires often enough.
  * - Semaphore handles come from a static pool sized by
  *   `NSX_ETHOSU_SEM_POOL_SIZE` (default 4: one global + one per NPU).
+ * - `ethosu_semaphore_take()`'s blocking path parks in `__WFE()` and must be
+ *   called from thread context with interrupts enabled; `ethosu_semaphore_give()`
+ *   is ISR-safe.
  * @{
  */
 
-/** @return Monotonic tick count; 0 from the weak default. */
+/**
+ * @return Monotonic tick count that wraps only at 2^64; 0 from the weak
+ *         default. Software-extend any narrower hardware counter.
+ */
 uint64_t nsx_ethos_u_ticks(void);
 
 /** @return Ticks per millisecond, or 0 for "no time source" (weak default). */

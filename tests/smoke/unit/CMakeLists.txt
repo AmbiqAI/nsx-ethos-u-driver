@@ -31,6 +31,9 @@ foreach(_variant hooks nohooks)
         target_compile_options(${_tgt} PRIVATE -Wall -Wextra -Werror)
     endif()
 
+    # Opens the test-only seam in the TU (nsx_ethos_u_sem_test_set_count).
+    target_compile_definitions(${_tgt} PRIVATE NSX_ETHOSU_SEM_TEST_ACCESS=1)
+
     if(_variant STREQUAL "hooks")
         target_compile_definitions(${_tgt} PRIVATE NSX_SEM_TEST_WITH_HOOKS=1)
     endif()
