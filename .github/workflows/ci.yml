@@ -59,17 +59,78 @@ jobs:
           test -f external/ethos-u-core-driver/include/ethosu_driver.h \
             || { echo "vendored driver tree missing"; exit 1; }
 
+  smoke-build:
+    name: Smoke build (${{ matrix.npu_config }}, log=${{ matrix.log_enable }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        npu_config: [ethos-u55-128, ethos-u85-256]
+        log_enable: [ON, OFF]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: |
+          cmake -S tests/smoke -B build/smoke \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DNSX_ETHOSU_NPU_CONFIG=${{ matrix.npu_config }} \
+            -DNSX_ETHOSU_LOG_ENABLE=${{ matrix.log_enable }}
+
+      - name: Build
+        run: cmake --build build/smoke --parallel
+
+      - name: Test
+        run: ctest --test-dir build/smoke --output-on-failure
+
+      - name: Verify vendored tree untouched
+        run: |
+          git diff --quiet -- external/ \
+            || { echo "::error::build modified external/ (provenance-protected)"; exit 1; }
+
+  smoke-build-arm:
+    name: Smoke build arm-none-eabi (${{ matrix.npu_config }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        npu_config: [ethos-u55-128, ethos-u85-256]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install arm-none-eabi-gcc
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+
+      # Cross build only compiles the static library: the harness carries no
+      # startup code or linker script, so the host job above is what runs the
+      # tests. This job exists to exercise the M-profile code paths (PRIMASK
+      # critical sections, WFE/SEV) that a host build compiles out.
+      - name: Configure
+        run: |
+          cmake -S tests/smoke -B build/smoke-arm \
+            -DCMAKE_SYSTEM_NAME=Generic \
+            -DCMAKE_SYSTEM_PROCESSOR=cortex-m55 \
+            -DCMAKE_C_COMPILER=arm-none-eabi-gcc \
+            -DCMAKE_C_FLAGS="-mcpu=cortex-m55 -mthumb" \
+            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+            -DNSX_ETHOSU_NPU_CONFIG=${{ matrix.npu_config }}
+
+      - name: Build static library
+        run: cmake --build build/smoke-arm --parallel --target nsx_ethos_u_driver
+
   gate:
     name: lint-and-test
     if: always()
-    needs: [lint, version-check, vendor-check]
+    needs: [lint, version-check, vendor-check, smoke-build, smoke-build-arm]
     runs-on: ubuntu-latest
     steps:
       - name: Decide status
         run: |
           if [[ "${{ needs.lint.result }}" != "success" ]] \
             || [[ "${{ needs.version-check.result }}" != "success" ]] \
-            || [[ "${{ needs.vendor-check.result }}" != "success" ]]; then
+            || [[ "${{ needs.vendor-check.result }}" != "success" ]] \
+            || [[ "${{ needs.smoke-build.result }}" != "success" ]] \
+            || [[ "${{ needs.smoke-build-arm.result }}" != "success" ]]; then
             echo "One or more CI jobs failed."
             exit 1
           fi

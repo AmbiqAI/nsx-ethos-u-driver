@@ -26,10 +26,11 @@
 #   `add_subdirectory()` upstream. Instead we list its sources here and let
 #   the active SoC-flags target carry the CPU/FPU/ABI flags transitively.
 #
-#   The upstream config headers (`src/ethosu_config_uX5.h`) still need a
-#   compile-time NPU family selector, which we provide via
-#   `ETHOSU_TARGET_NPU_CONFIG`. The per-NPU device backend
-#   (`ethosu_device_uXX.cc`) is selected from the family token below.
+#   Upstream source still needs a compile-time NPU family selector, which we
+#   provide as `ETHOSU_ARCH` plus the matching `ETHOSU55`/`ETHOSU65`/`ETHOSU85`
+#   define (this is what `src/ethosu_interface.h` and the config headers
+#   actually gate on). The per-NPU device backend (`ethosu_device_uXX.c`) is
+#   selected from the family token below.
 #
 # If you ever need to re-evaluate this trade-off, the pivot point is whether
 # upstream's CMakeLists begins to bake in flag generation we can't easily
@@ -167,16 +168,18 @@ target_compile_definitions(nsx_ethos_u_driver PUBLIC
     ${NSX_ETHOSU_DEVICE_DEFINE}
     NSX_HAS_NPU=1
     NSX_ETHOSU_NPU_FAMILY_${NSX_ETHOSU_FAMILY}=1
-    # Upstream consumes this string (quoted) in its config header to gate
-    # NPU-specific code paths. Keep it on the PUBLIC interface so apps that
-    # include `ethosu_driver.h` directly see the same value.
-    ETHOSU_TARGET_NPU_CONFIG="${NSX_ETHOSU_NPU_CONFIG}"
 )
 
-# `ETHOS_U_NPU_CONFIG_ID` is the form used by some upstream headers without
-# the leading "ethos-" prefix; harmless to expose both.
+# NOTE: `ETHOSU_TARGET_NPU_CONFIG` and `ETHOSU_TARGET_NPU` used to be defined
+# here with a comment claiming upstream's config headers consumed them. They do
+# not. `ETHOSU_TARGET_NPU_CONFIG` is a *CMake cache variable* read only by
+# upstream's own CMakeLists.txt (which we deliberately do not
+# add_subdirectory(); see the header comment), and `ETHOSU_TARGET_NPU` appears
+# nowhere in the vendored tree at all. Verify with:
+#     git grep -n ETHOSU_TARGET_NPU external/
+# The gating that upstream source *does* perform is on ETHOSU_ARCH / ETHOSU55 /
+# ETHOSU65 / ETHOSU85, all set above.
 target_compile_definitions(nsx_ethos_u_driver PRIVATE
-    ETHOSU_TARGET_NPU=${NSX_ETHOSU_FAMILY_NUM}
     ETHOSU_LOG_ENABLE=$<BOOL:${NSX_ETHOSU_LOG_ENABLE}>
 )
 
