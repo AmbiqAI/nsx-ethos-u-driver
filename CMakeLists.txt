@@ -20,7 +20,7 @@
 #
 #   Upstream *defines* its bare-metal hooks (ethosu_semaphore_*, ethosu_*cache,
 #   ethosu_inference_begin/end, ethosu_address_remap) as weak symbols inside
-#   ethosu_driver.c / ethosu_device_uXX.c. Our strong replacements live in
+#   ethosu_driver.c. Our strong replacements live in
 #   separate TUs in src/.
 #
 #   If those TUs are ordinary members of a STATIC archive, they are DEAD CODE:
@@ -83,7 +83,7 @@
 #   Upstream source still needs a compile-time NPU family selector, which we
 #   provide as `ETHOSU_ARCH` plus the matching `ETHOSU55`/`ETHOSU65`/`ETHOSU85`
 #   define (this is what `src/ethosu_interface.h` and the config headers
-#   actually gate on). The per-NPU device backend (`ethosu_device_uXX.c`) is
+#   actually gate on). The per-NPU device backend (`ethosu_backend_uNN.c`) is
 #   selected from the family token below.
 #
 # If you ever need to re-evaluate this trade-off, the pivot point is whether
@@ -188,19 +188,18 @@ if(NOT EXISTS "${_NSX_ETHOSU_VENDOR_INC}/ethosu_driver.h")
         "re-vendor it from the pinned revision in PROVENANCE.md.")
 endif()
 
-# Verified against ethos-u-core-driver tag 24.08, all .c (no .cc):
+# Verified against ethos-u-core-driver tag 26.08 (driver 2.0.0), all .c (no .cc):
 #   src/ethosu_driver.c
-#   src/ethosu_device_u55_u65.c   (U55 and U65 share one backend)
-#   src/ethosu_device_u85.c
-#   src/ethosu_pmu.c
-# If a future bump changes file extensions or adds a new device backend,
-# update the list below.
+#   src/ethosu_backend_uNN.c   (one backend per NPU family since 2.0.0)
+#   src/ethosu_pmu_uNN.c       (per-family PMU descriptor; ethosu_driver.c binds
+#                               drv->pmu to it at init, so it is NOT optional)
+#   src/ethosu_pmu.c           (public ETHOSU_PMU_* API, dispatching through drv->pmu)
+# Single-variant build: upstream's ETHOSU_MULTI_VARIANT stays undefined, which
+# keeps the legacy ethosu_init()/ethosu_reserve_driver() API.
+# If a future bump changes file extensions or the backend layout, update the
+# list below.
 
-if(NSX_ETHOSU_FAMILY STREQUAL "u55" OR NSX_ETHOSU_FAMILY STREQUAL "u65")
-    set(_NSX_ETHOSU_DEVICE_SRC "${_NSX_ETHOSU_VENDOR_SRC}/ethosu_device_u55_u65.c")
-elseif(NSX_ETHOSU_FAMILY STREQUAL "u85")
-    set(_NSX_ETHOSU_DEVICE_SRC "${_NSX_ETHOSU_VENDOR_SRC}/ethosu_device_u85.c")
-else()
+if(NOT NSX_ETHOSU_FAMILY MATCHES "^u(55|65|85)$")
     message(FATAL_ERROR
         "nsx-ethos-u-driver: unsupported NPU family '${NSX_ETHOSU_FAMILY}' "
         "(from NSX_ETHOSU_NPU_CONFIG='${NSX_ETHOSU_NPU_CONFIG}'). "
@@ -209,7 +208,8 @@ endif()
 
 set(_NSX_ETHOSU_UPSTREAM_SOURCES
     ${_NSX_ETHOSU_VENDOR_SRC}/ethosu_driver.c
-    ${_NSX_ETHOSU_DEVICE_SRC}
+    ${_NSX_ETHOSU_VENDOR_SRC}/ethosu_backend_${NSX_ETHOSU_FAMILY}.c
+    ${_NSX_ETHOSU_VENDOR_SRC}/ethosu_pmu_${NSX_ETHOSU_FAMILY}.c
 )
 if(NSX_ETHOSU_BUILD_PMU)
     list(APPEND _NSX_ETHOSU_UPSTREAM_SOURCES ${_NSX_ETHOSU_VENDOR_SRC}/ethosu_pmu.c)
