@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/AmbiqAI/nsx-ethos-u-driver/compare/nsx-ethos-u-driver-v0.1.2...nsx-ethos-u-driver-v0.2.0) (2026-09-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **deps:** ethosu_flush_dcache()/ethosu_invalidate_dcache() overrides must adopt the new signature, struct ethosu_driver changed layout, and ethosu_invalidate_dcache() now runs before ethosu_inference_end(), so the begin/end probe window includes cache invalidation.
+
+### Features
+
+* **deps:** bump ethos-u-core-driver to 26.08 (driver 2.0.0), fixing U85 PMU event mapping ([39f3cd2](https://github.com/AmbiqAI/nsx-ethos-u-driver/commit/39f3cd2e4f112a91eb35165a81cf5903825766e5))
+
 ## [0.1.2](https://github.com/AmbiqAI/nsx-ethos-u-driver/compare/nsx-ethos-u-driver-v0.1.1...nsx-ethos-u-driver-v0.1.2) (2026-08-22)
 
 
