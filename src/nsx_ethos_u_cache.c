@@ -6,12 +6,13 @@
  * core driver. These replace the weak no-op defaults shipped by
  * upstream; see ethos-u-core-driver/README.md ("Data caching").
  *
- * Both addresses are required by the upstream contract to be 16-byte
- * aligned (ethosu_driver.h); the CMSIS SCB helpers round coverage out to
- * whole 32-byte cache lines. Applications are still strongly
- * encouraged to perform their own IFM flush before invoking inference
- * rather than relying
- * on `ethosu_flush_dcache`, which upstream documents as deprecated.
+ * Since driver 2.0.0 the hooks receive the job's whole base-pointer table
+ * (address + size per region) once per inference instead of one call per
+ * region, and the command stream is no longer passed separately: it lives
+ * in the model's constant data, which the CPU never writes after boot.
+ * Every populated region is cleaned before dispatch and invalidated after
+ * completion, which is what the pre-2.0.0 driver did on our behalf. The
+ * CMSIS SCB helpers round coverage out to whole 32-byte cache lines.
  */
 
 #include <stddef.h>
@@ -29,34 +30,36 @@
  * `ethosu_driver.h`. Our strong definitions here win the link.
  */
 
-void ethosu_flush_dcache(uint32_t *p, size_t bytes) {
+void ethosu_flush_dcache(const uint64_t *base_addr, const size_t *base_addr_size, int num_base_addr) {
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    if (p == NULL) {
-        /* Upstream contract (ethosu_driver.h): NULL means "flush the
-         * whole cache". */
-        SCB_CleanDCache();
-    } else if (bytes > 0U) {
-        SCB_CleanDCache_by_Addr(p, (int32_t)bytes);
+    if (base_addr == NULL || base_addr_size == NULL) {
+        return;
+    }
+    for (int i = 0; i < num_base_addr; i++) {
+        if (base_addr[i] != 0U && base_addr_size[i] > 0U) {
+            SCB_CleanDCache_by_Addr((void *)(uintptr_t)base_addr[i], (int32_t)base_addr_size[i]);
+        }
     }
 #else
-    (void)p;
-    (void)bytes;
+    (void)base_addr;
+    (void)base_addr_size;
+    (void)num_base_addr;
 #endif
 }
 
-void ethosu_invalidate_dcache(uint32_t *p, size_t bytes) {
+void ethosu_invalidate_dcache(const uint64_t *base_addr, const size_t *base_addr_size, int num_base_addr) {
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
-    if (p == NULL) {
-        /* Upstream contract: NULL means "invalidate the whole cache".
-         * Clean+invalidate rather than a raw invalidate: discarding
-         * unrelated dirty lines (stack, globals) system-wide would
-         * corrupt program state. */
-        SCB_CleanInvalidateDCache();
-    } else if (bytes > 0U) {
-        SCB_InvalidateDCache_by_Addr(p, (int32_t)bytes);
+    if (base_addr == NULL || base_addr_size == NULL) {
+        return;
+    }
+    for (int i = 0; i < num_base_addr; i++) {
+        if (base_addr[i] != 0U && base_addr_size[i] > 0U) {
+            SCB_InvalidateDCache_by_Addr((void *)(uintptr_t)base_addr[i], (int32_t)base_addr_size[i]);
+        }
     }
 #else
-    (void)p;
-    (void)bytes;
+    (void)base_addr;
+    (void)base_addr_size;
+    (void)num_base_addr;
 #endif
 }

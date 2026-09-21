@@ -4,8 +4,7 @@ NSX integration of [Arm's ethos-u-core-driver][upstream] — a runtime-agnostic
 module that lets any NSX consumer (HeliaAOT, HeliaRT, plain TFLM, custom C
 runtimes) invoke Vela-compiled command streams on an Arm Ethos-U NPU.
 
-[upstream]: https://git.mlplatform.org/ml/ethos-u/ethos-u-core-driver.git
-            (mirror: https://github.com/meta-pytorch/ethos-u-core-driver-mirror)
+[upstream]: https://gitlab.arm.com/artificial-intelligence/ethos-u/ethos-u-core-driver
 
 ## What this module is
 
@@ -50,7 +49,7 @@ To upgrade upstream, replace the tree with the new revision's files and
 update `PROVENANCE.md` in the same commit:
 
 ```sh
-git clone https://github.com/meta-pytorch/ethos-u-core-driver-mirror.git /tmp/eucd
+git clone https://gitlab.arm.com/artificial-intelligence/ethos-u/ethos-u-core-driver.git /tmp/eucd
 git -C /tmp/eucd checkout <tag-or-sha>
 rsync -a --delete --exclude=.git /tmp/eucd/ external/ethos-u-core-driver/
 git add external/ethos-u-core-driver PROVENANCE.md
@@ -84,12 +83,12 @@ Set in your board (or app) before adding the module:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `NSX_ETHOSU_NPU_CONFIG` | `ethos-u85-256` | Vela / driver NPU config (`ethos-uNN-MACS`). |
-| `NSX_ETHOSU_BUILD_PMU` | `ON` | Build the upstream PMU helper TU. |
+| `NSX_ETHOSU_BUILD_PMU` | `ON` | Build the public `ETHOSU_PMU_*` API TU (`ethosu_pmu.c`). The per-family PMU descriptor (`ethosu_pmu_uNN.c`) is always built: since driver 2.0.0 `ethosu_init()` binds to it. |
 | `NSX_ETHOSU_LOG_ENABLE` | `OFF` | Enable upstream `LOG()`/`fprintf` driver logging. |
 | `NSX_ETHOSU_INFERENCE_TIMEOUT_MS` | *(empty)* | Deadline in ms for `ethosu_wait()`. Empty = upstream's "wait forever"; otherwise 1…4294967295 (0 is rejected — it would time out every inference instantly). |
 
 The CMakeLists parses the family token (`u55` / `u65` / `u85`) from
-`NSX_ETHOSU_NPU_CONFIG` and selects the matching `ethosu_device_uNN`
+`NSX_ETHOSU_NPU_CONFIG` and selects the matching `ethosu_backend_uNN`
 source. The family is exposed to consumers as the public compile
 definitions `ETHOSU_ARCH`, `ETHOSU_MACS` and `ETHOSU55`/`ETHOSU65`/`ETHOSU85`
 — the names upstream's own sources actually gate on. (There is no

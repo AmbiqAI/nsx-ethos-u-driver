@@ -3,7 +3,7 @@
 #
 # Archive-link acceptance check: prove the NSX strong overrides actually made
 # it into a FINAL LINK, rather than losing to the weak definitions upstream
-# ships inside ethosu_driver.c / ethosu_device_uXX.c.
+# ships inside ethosu_driver.c.
 #
 # This is the regression test for the bug where the override TUs were plain
 # members of libnsx_ethos_u_driver.a: the linker never extracted them (nothing
