@@ -147,6 +147,15 @@ option(NSX_ETHOSU_LOG_ENABLE
 set(NSX_ETHOSU_INFERENCE_TIMEOUT_MS "" CACHE STRING
     "Inference-wait timeout in ms for ethosu_wait() (empty = wait forever)")
 
+# Ethos-U85 only: AXI_SRAM.max_beats, the alignment in bytes at which the NPU
+# splits SRAM bursts. The U85 picks the SRAM port from bit 7 of a burst's start
+# address (128-byte stripes), so upstream's 256-byte default keeps both stripes
+# of an aligned burst on SRAM0 and leaves SRAM1 mostly idle. 128 spreads reads
+# and writes 50/50 across the two SRAM ports.
+set(NSX_ETHOSU_SRAM_MAX_BEATS "128" CACHE STRING
+    "Ethos-U85 SRAM AXI burst split alignment in bytes (64, 128 or 256)")
+set_property(CACHE NSX_ETHOSU_SRAM_MAX_BEATS PROPERTY STRINGS 64 128 256)
+
 # Parse the family (u55 / u65 / u85) from the config string. Used both to
 # pick the device backend source and to set per-family compile defines that
 # upstream's headers gate on.
@@ -372,6 +381,24 @@ target_compile_definitions(nsx_ethos_u_driver PUBLIC ${_NSX_ETHOSU_PUBLIC_DEFS})
 target_compile_definitions(nsx_ethos_u_driver PRIVATE
     ETHOSU_LOG_ENABLE=$<BOOL:${NSX_ETHOSU_LOG_ENABLE}>
 )
+
+if(NSX_ETHOSU_FAMILY STREQUAL "u85")
+    if(NSX_ETHOSU_SRAM_MAX_BEATS STREQUAL "64")
+        set(_NSX_ETHOSU_SRAM_MAX_BEATS_ENC 0)
+    elseif(NSX_ETHOSU_SRAM_MAX_BEATS STREQUAL "128")
+        set(_NSX_ETHOSU_SRAM_MAX_BEATS_ENC 1)
+    elseif(NSX_ETHOSU_SRAM_MAX_BEATS STREQUAL "256")
+        set(_NSX_ETHOSU_SRAM_MAX_BEATS_ENC 2)
+    else()
+        message(FATAL_ERROR
+            "nsx-ethos-u-driver: NSX_ETHOSU_SRAM_MAX_BEATS="
+            "'${NSX_ETHOSU_SRAM_MAX_BEATS}' must be 64, 128 or 256.")
+    endif()
+    # PRIVATE: only ethosu_backend_u85.c reads it, through the private
+    # ethosu_config_u85.h, whose #ifndef default this overrides.
+    target_compile_definitions(nsx_ethos_u_driver PRIVATE
+        AXI_LIMIT_SRAM_MAX_BEATS=${_NSX_ETHOSU_SRAM_MAX_BEATS_ENC})
+endif()
 
 # With logging off, LOG_ERR() in the vendored device backends expands to
 # nothing and leaves their `dev` parameter unused; the Arm tree stays
