@@ -86,7 +86,7 @@ Set in your board (or app) before adding the module:
 | `NSX_ETHOSU_BUILD_PMU` | `ON` | Build the public `ETHOSU_PMU_*` API TU (`ethosu_pmu.c`). The per-family PMU descriptor (`ethosu_pmu_uNN.c`) is always built: since driver 2.0.0 `ethosu_init()` binds to it. |
 | `NSX_ETHOSU_LOG_ENABLE` | `OFF` | Enable upstream `LOG()`/`fprintf` driver logging. |
 | `NSX_ETHOSU_INFERENCE_TIMEOUT_MS` | *(empty)* | Deadline in ms for `ethosu_wait()`. Empty = upstream's "wait forever"; otherwise 1…4294967295 (0 is rejected — it would time out every inference instantly). |
-| `NSX_ETHOSU_SRAM_MAX_BEATS` | `128` | Ethos-U85 only: SRAM AXI burst split alignment in bytes (`64`, `128` or `256`), written to `AXI_SRAM.max_beats`. `128` balances traffic across the two SRAM ports; `256` is upstream's default. |
+| `NSX_ETHOSU_SRAM_MAX_BEATS` | `128` | Ethos-U85 only: SRAM AXI burst split alignment in bytes (`64`, `128` or `256`), written to `AXI_SRAM.max_beats`. `128` improved SRAM-port utilization on the tested Atomiq110 FPGA integration (port selection is address hashing and pattern dependent, so results vary per integration); `256` is upstream's default. |
 
 The CMakeLists parses the family token (`u55` / `u65` / `u85`) from
 `NSX_ETHOSU_NPU_CONFIG` and selects the matching `ethosu_backend_uNN`

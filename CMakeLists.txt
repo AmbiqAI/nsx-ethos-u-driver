@@ -148,10 +148,11 @@ set(NSX_ETHOSU_INFERENCE_TIMEOUT_MS "" CACHE STRING
     "Inference-wait timeout in ms for ethosu_wait() (empty = wait forever)")
 
 # Ethos-U85 only: AXI_SRAM.max_beats, the alignment in bytes at which the NPU
-# splits SRAM bursts. The U85 picks the SRAM port from bit 7 of a burst's start
-# address (128-byte stripes), so upstream's 256-byte default keeps both stripes
-# of an aligned burst on SRAM0 and leaves SRAM1 mostly idle. 128 spreads reads
-# and writes 50/50 across the two SRAM ports.
+# splits SRAM bursts. SRAM-port selection is configurable address hashing and
+# the resulting balance depends on the access pattern (Arm U85 TRM 3.3.1.22-23),
+# so this is not a universal U85 rule: on the tested Atomiq110 FPGA integration,
+# 128-byte bursts improved SRAM-port utilization over upstream's 256-byte
+# default, which there left SRAM1 mostly idle.
 set(NSX_ETHOSU_SRAM_MAX_BEATS "128" CACHE STRING
     "Ethos-U85 SRAM AXI burst split alignment in bytes (64, 128 or 256)")
 set_property(CACHE NSX_ETHOSU_SRAM_MAX_BEATS PROPERTY STRINGS 64 128 256)
